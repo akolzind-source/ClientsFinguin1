@@ -19,6 +19,7 @@ import {
   Trash2,
   X,
 } from "lucide-react";
+import Image from "next/image";
 import type { CSSProperties, FormEvent } from "react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type {
@@ -39,6 +40,13 @@ const TASK_STATUSES: TaskStatus[] = ["Не начато", "В работе", "Н
 const IDEA_STATUSES: IdeaStatus[] = ["Новая", "На обсуждении", "Одобрена", "В реализации", "Реализована", "Отклонена"];
 const PRIORITIES: Priority[] = ["Высокий", "Средний", "Низкий"];
 const REGULAR_FREQUENCIES: Array<{ value: RegularFrequency; label: string }> = [
+  { value: "weekly", label: "Каждую неделю" },
+  { value: "monthly", label: "Каждый месяц" },
+  { value: "quarterly", label: "Каждый квартал" },
+];
+type MeetingRepeat = "none" | "weekly" | "monthly" | "quarterly";
+const MEETING_REPEATS: Array<{ value: MeetingRepeat; label: string }> = [
+  { value: "none", label: "Не повторяется" },
   { value: "weekly", label: "Каждую неделю" },
   { value: "monthly", label: "Каждый месяц" },
   { value: "quarterly", label: "Каждый квартал" },
@@ -73,6 +81,34 @@ function formatShortDate(value: string) {
   const date = parseDate(value);
   if (Number.isNaN(date.getTime())) return "—";
   return date.getDate() + " " + MONTHS_GENITIVE[date.getMonth()];
+}
+
+function getMeetingRepeatDates(startValue: string, repeat: MeetingRepeat) {
+  const start = parseDate(startValue);
+  if (Number.isNaN(start.getTime())) return [];
+  if (repeat === "none") return [startValue];
+
+  const end = new Date(start.getFullYear() + 1, start.getMonth(), start.getDate(), 12);
+  const dates: string[] = [];
+  if (repeat === "weekly") {
+    const cursor = new Date(start);
+    while (cursor <= end && dates.length < 120) {
+      dates.push(toISO(cursor));
+      cursor.setDate(cursor.getDate() + 7);
+    }
+    return dates;
+  }
+
+  const monthStep = repeat === "quarterly" ? 3 : 1;
+  const anchorDay = start.getDate();
+  for (let monthOffset = 0; dates.length < 120; monthOffset += monthStep) {
+    const monthStart = new Date(start.getFullYear(), start.getMonth() + monthOffset, 1, 12);
+    const day = Math.min(anchorDay, new Date(monthStart.getFullYear(), monthStart.getMonth() + 1, 0, 12).getDate());
+    const occurrence = new Date(monthStart.getFullYear(), monthStart.getMonth(), day, 12);
+    if (occurrence > end) break;
+    dates.push(toISO(occurrence));
+  }
+  return dates;
 }
 
 function pluralTasks(count: number) {
@@ -199,6 +235,186 @@ function regularStatusClass(status: RegularStatus) {
   return "regular-status regular-status-planned";
 }
 
+function normalizePerson(value: string) {
+  return value.trim().replace(/\s+/g, " ");
+}
+
+function splitPeople(value: string) {
+  return value.split(",").map(normalizePerson).filter(Boolean);
+}
+
+function mergePeople(people: string[], additions: string[]) {
+  const result = [...people];
+  const known = new Set(people.map((person) => person.toLocaleLowerCase("ru")));
+  additions.forEach((item) => {
+    const person = normalizePerson(item);
+    const key = person.toLocaleLowerCase("ru");
+    if (!person || known.has(key)) return;
+    known.add(key);
+    result.push(person);
+  });
+  return result;
+}
+
+type PersonPickerProps = {
+  people: string[];
+  onAddPerson: (person: string) => void;
+  onDeletePerson: (person: string) => void;
+};
+
+function PersonSelect({
+  value,
+  onChange,
+  people,
+  onAddPerson,
+  onDeletePerson,
+}: PersonPickerProps & { value: string; onChange: (value: string) => void }) {
+  const [open, setOpen] = useState(false);
+  const [query, setQuery] = useState("");
+  const normalizedQuery = normalizePerson(query);
+  const filteredPeople = people.filter((person) => !normalizedQuery || person.toLocaleLowerCase("ru").includes(normalizedQuery.toLocaleLowerCase("ru")));
+  const hasExactMatch = people.some((person) => person.toLocaleLowerCase("ru") === normalizedQuery.toLocaleLowerCase("ru"));
+
+  function choose(person: string) {
+    const normalized = normalizePerson(person);
+    if (!normalized) return;
+    onChange(normalized);
+    onAddPerson(normalized);
+    setQuery("");
+    setOpen(false);
+  }
+
+  return (
+    <div className="person-picker" onBlur={(event) => {
+      if (!event.currentTarget.contains(event.relatedTarget)) setOpen(false);
+    }}>
+      <input
+        value={value}
+        onChange={(event) => {
+          setQuery(event.target.value);
+          onChange(event.target.value);
+          setOpen(true);
+        }}
+        onFocus={() => {
+          setQuery("");
+          setOpen(true);
+        }}
+        onClick={() => setOpen(true)}
+        onKeyDown={(event) => {
+          if (event.key === "Enter" && normalizePerson(value)) {
+            event.preventDefault();
+            choose(value);
+          }
+          if (event.key === "Escape") setOpen(false);
+        }}
+        placeholder="Выберите или введите имя"
+        autoComplete="off"
+      />
+      <ChevronDown className="person-picker-chevron" size={15} />
+      {open && (
+        <div className="person-dropdown">
+          {normalizedQuery && !hasExactMatch && (
+            <button type="button" className="person-add-option" onMouseDown={(event) => event.preventDefault()} onClick={() => choose(normalizedQuery)}>
+              <Plus size={14} />Добавить «{normalizedQuery}»
+            </button>
+          )}
+          {filteredPeople.map((person) => (
+            <div className="person-option" key={person}>
+              <button type="button" className="person-option-select" onMouseDown={(event) => event.preventDefault()} onClick={() => choose(person)}>
+                <span>{person}</span>{person === value && <Check size={14} />}
+              </button>
+              <button type="button" className="person-option-delete" title="Удалить из справочника" aria-label={"Удалить " + person + " из справочника"} onMouseDown={(event) => event.preventDefault()} onClick={() => onDeletePerson(person)}>
+                <Trash2 size={13} />
+              </button>
+            </div>
+          ))}
+          {filteredPeople.length === 0 && !normalizedQuery && <div className="person-empty">Справочник пока пуст</div>}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function PeopleSelect({
+  value,
+  onChange,
+  people,
+  onAddPerson,
+  onDeletePerson,
+}: PersonPickerProps & { value: string; onChange: (value: string) => void }) {
+  const [open, setOpen] = useState(false);
+  const [query, setQuery] = useState("");
+  const selected = splitPeople(value);
+  const normalizedQuery = normalizePerson(query);
+  const filteredPeople = people.filter((person) => !normalizedQuery || person.toLocaleLowerCase("ru").includes(normalizedQuery.toLocaleLowerCase("ru")));
+  const hasExactMatch = people.some((person) => person.toLocaleLowerCase("ru") === normalizedQuery.toLocaleLowerCase("ru"));
+
+  function updateSelected(next: string[]) {
+    onChange(mergePeople([], next).join(", "));
+  }
+
+  function toggle(person: string) {
+    const normalized = normalizePerson(person);
+    if (!normalized) return;
+    const selectedKey = normalized.toLocaleLowerCase("ru");
+    const isSelected = selected.some((item) => item.toLocaleLowerCase("ru") === selectedKey);
+    updateSelected(isSelected ? selected.filter((item) => item.toLocaleLowerCase("ru") !== selectedKey) : [...selected, normalized]);
+    onAddPerson(normalized);
+    setQuery("");
+  }
+
+  return (
+    <div className="person-picker people-picker" onBlur={(event) => {
+      if (!event.currentTarget.contains(event.relatedTarget)) setOpen(false);
+    }}>
+      <div className="people-input-shell" onClick={(event) => (event.currentTarget.querySelector("input") as HTMLInputElement | null)?.focus()}>
+        {selected.map((person) => (
+          <span className="people-chip" key={person}>{person}<button type="button" aria-label={"Убрать " + person + " из участников"} onClick={(event) => { event.stopPropagation(); updateSelected(selected.filter((item) => item !== person)); }}><X size={12} /></button></span>
+        ))}
+        <input
+          value={query}
+          onChange={(event) => { setQuery(event.target.value); setOpen(true); }}
+          onFocus={() => setOpen(true)}
+          onKeyDown={(event) => {
+            if (event.key === "Enter" && normalizedQuery) {
+              event.preventDefault();
+              toggle(normalizedQuery);
+            }
+            if (event.key === "Backspace" && !query && selected.length) updateSelected(selected.slice(0, -1));
+            if (event.key === "Escape") setOpen(false);
+          }}
+          placeholder={selected.length ? "Добавить ещё" : "Выберите или введите участника"}
+          autoComplete="off"
+        />
+      </div>
+      <ChevronDown className="person-picker-chevron" size={15} />
+      {open && (
+        <div className="person-dropdown">
+          {normalizedQuery && !hasExactMatch && (
+            <button type="button" className="person-add-option" onMouseDown={(event) => event.preventDefault()} onClick={() => toggle(normalizedQuery)}>
+              <Plus size={14} />Добавить «{normalizedQuery}»
+            </button>
+          )}
+          {filteredPeople.map((person) => {
+            const isSelected = selected.some((item) => item.toLocaleLowerCase("ru") === person.toLocaleLowerCase("ru"));
+            return (
+              <div className="person-option" key={person}>
+                <button type="button" className="person-option-select" onMouseDown={(event) => event.preventDefault()} onClick={() => toggle(person)}>
+                  <span>{person}</span>{isSelected && <Check size={14} />}
+                </button>
+                <button type="button" className="person-option-delete" title="Удалить из справочника" aria-label={"Удалить " + person + " из справочника"} onMouseDown={(event) => event.preventDefault()} onClick={() => onDeletePerson(person)}>
+                  <Trash2 size={13} />
+                </button>
+              </div>
+            );
+          })}
+          {filteredPeople.length === 0 && !normalizedQuery && <div className="person-empty">Справочник пока пуст</div>}
+        </div>
+      )}
+    </div>
+  );
+}
+
 function CommentsEditor({
   comments,
   onChange,
@@ -285,12 +501,18 @@ function ModalShell({
 function TaskDialog({
   item,
   tasks,
+  people,
+  onAddPerson,
+  onDeletePerson,
   onClose,
   onSave,
   onDelete,
 }: {
   item: Task | null;
   tasks: Task[];
+  people: string[];
+  onAddPerson: (person: string) => void;
+  onDeletePerson: (person: string) => void;
   onClose: () => void;
   onSave: (task: Task) => void;
   onDelete: (id: string) => void;
@@ -334,7 +556,7 @@ function TaskDialog({
               setTaskType(value);
               if (value === "parent") setDraft({ ...draft, parentId: null });
             }}><option value="subtask" disabled={parents.length === 0 || hasChildren}>Подзадача</option><option value="parent">Надзадача</option></select><ChevronDown size={15} /></label>
-            <label className="field">Ответственный<input value={draft.assignee} onChange={(event) => setDraft({ ...draft, assignee: event.target.value })} placeholder="Имя или роль" /></label>
+            <div className="field"><span>Ответственный</span><PersonSelect value={draft.assignee} onChange={(assignee) => setDraft({ ...draft, assignee })} people={people} onAddPerson={onAddPerson} onDeletePerson={onDeletePerson} /></div>
             {taskType === "subtask" && <label className="field field-wide">К какой надзадаче прикрепить<select value={draft.parentId || ""} onChange={(event) => setDraft({ ...draft, parentId: event.target.value || null })}><option value="">Выберите надзадачу</option>{parents.map((task) => <option value={task.id} key={task.id}>{task.title}</option>)}</select><ChevronDown size={15} /></label>}
             <label className="field">Дата начала<input type="date" value={draft.startDate} onChange={(event) => setDraft({ ...draft, startDate: event.target.value })} /></label>
             <label className="field">Дедлайн<input type="date" value={draft.endDate} onChange={(event) => setDraft({ ...draft, endDate: event.target.value })} /></label>
@@ -354,11 +576,17 @@ function TaskDialog({
 
 function IdeaDialog({
   item,
+  people,
+  onAddPerson,
+  onDeletePerson,
   onClose,
   onSave,
   onDelete,
 }: {
   item: Idea | null;
+  people: string[];
+  onAddPerson: (person: string) => void;
+  onDeletePerson: (person: string) => void;
   onClose: () => void;
   onSave: (idea: Idea) => void;
   onDelete: (id: string) => void;
@@ -379,7 +607,7 @@ function IdeaDialog({
   function submit(event: FormEvent) {
     event.preventDefault();
     if (!draft.title.trim()) return setError("Укажите название решения.");
-    onSave({ ...draft, title: draft.title.trim() });
+    onSave({ ...draft, title: draft.title.trim(), owner: draft.owner.trim() });
   }
 
   return (
@@ -391,7 +619,7 @@ function IdeaDialog({
           <div className="form-grid">
             <label className="field">Статус<select value={draft.status} onChange={(event) => setDraft({ ...draft, status: event.target.value as IdeaStatus })}>{IDEA_STATUSES.map((status) => <option key={status}>{status}</option>)}</select><ChevronDown size={15} /></label>
             <label className="field">Приоритет<select value={draft.priority} onChange={(event) => setDraft({ ...draft, priority: event.target.value as Priority })}>{PRIORITIES.map((priority) => <option key={priority}>{priority}</option>)}</select><ChevronDown size={15} /></label>
-            <label className="field">Ответственный<input value={draft.owner} onChange={(event) => setDraft({ ...draft, owner: event.target.value })} placeholder="Имя или роль" /></label>
+            <div className="field"><span>Ответственный</span><PersonSelect value={draft.owner} onChange={(owner) => setDraft({ ...draft, owner })} people={people} onAddPerson={onAddPerson} onDeletePerson={onDeletePerson} /></div>
             <label className="field">Срок<input type="date" value={draft.deadline} onChange={(event) => setDraft({ ...draft, deadline: event.target.value })} /></label>
             <label className="field field-wide">Ожидаемый эффект<input value={draft.effect} onChange={(event) => setDraft({ ...draft, effect: event.target.value })} placeholder="Например, +500 тыс. ₽ / мес." /></label>
           </div>
@@ -410,14 +638,20 @@ function IdeaDialog({
 function MeetingDialog({
   item,
   defaultDate,
+  people,
+  onAddPerson,
+  onDeletePerson,
   onClose,
   onSave,
   onDelete,
 }: {
   item: Meeting | null;
   defaultDate: string;
+  people: string[];
+  onAddPerson: (person: string) => void;
+  onDeletePerson: (person: string) => void;
   onClose: () => void;
-  onSave: (meeting: Meeting) => void;
+  onSave: (meeting: Meeting, repeat: MeetingRepeat) => void;
   onDelete: (id: string) => void;
 }) {
   const [draft, setDraft] = useState<Meeting>(() => item ? { ...item, comments: [...item.comments] } : {
@@ -434,6 +668,7 @@ function MeetingDialog({
     outcome: "",
     comments: [],
   });
+  const [repeat, setRepeat] = useState<MeetingRepeat>("none");
   const [error, setError] = useState("");
 
   function markCompleted() {
@@ -449,9 +684,10 @@ function MeetingDialog({
     event.preventDefault();
     if (!draft.title.trim()) return setError("Укажите тему встречи.");
     if (!draft.plannedDate) return setError("Укажите плановую дату.");
+    if (repeat !== "none" && draft.status !== "planned") return setError("Повторение можно настроить только для запланированной встречи.");
     if (draft.status === "completed" && !draft.actualDate) return setError("Укажите фактическую дату.");
     if (draft.status === "completed" && !draft.duration) return setError("Выберите длительность встречи.");
-    onSave({ ...draft, title: draft.title.trim() });
+    onSave({ ...draft, title: draft.title.trim(), participants: splitPeople(draft.participants).join(", ") }, repeat);
   }
 
   return (
@@ -462,7 +698,8 @@ function MeetingDialog({
           <div className="form-grid">
             <label className="field">Плановая дата<input type="date" value={draft.plannedDate} onChange={(event) => setDraft({ ...draft, plannedDate: event.target.value })} /></label>
             <label className="field">Плановое время<input type="time" value={draft.plannedTime} onChange={(event) => setDraft({ ...draft, plannedTime: event.target.value })} /></label>
-            <label className="field field-wide">Участники<input value={draft.participants} onChange={(event) => setDraft({ ...draft, participants: event.target.value })} placeholder="Перечислите участников текстом" /></label>
+            {!item && <label className="field field-wide recurrence-field">Повторение<select value={repeat} onChange={(event) => setRepeat(event.target.value as MeetingRepeat)}>{MEETING_REPEATS.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}</select><ChevronDown size={15} />{repeat !== "none" && <small className="field-note">Будет создано {getMeetingRepeatDates(draft.plannedDate, repeat).length} отдельных встреч на 12 месяцев вперёд.</small>}</label>}
+            <div className="field field-wide"><span>Участники</span><PeopleSelect value={draft.participants} onChange={(participants) => setDraft({ ...draft, participants })} people={people} onAddPerson={onAddPerson} onDeletePerson={onDeletePerson} /></div>
           </div>
           <label className="field field-wide">Повестка<textarea rows={2} value={draft.agenda} onChange={(event) => setDraft({ ...draft, agenda: event.target.value })} placeholder="Что нужно обсудить и решить" /></label>
           <div className="meeting-status-line">
@@ -494,12 +731,18 @@ function MeetingDialog({
 function RegularTaskDialog({
   item,
   tasks,
+  people,
+  onAddPerson,
+  onDeletePerson,
   onClose,
   onSave,
   onDelete,
 }: {
   item: RegularTask | null;
   tasks: RegularTask[];
+  people: string[];
+  onAddPerson: (person: string) => void;
+  onDeletePerson: (person: string) => void;
   onClose: () => void;
   onSave: (task: RegularTask) => void;
   onDelete: (id: string) => void;
@@ -551,7 +794,7 @@ function RegularTaskDialog({
               setTaskType(value);
               if (value === "parent") setDraft({ ...draft, parentId: null });
             }}><option value="subtask" disabled={parents.length === 0 || hasChildren}>Подэтап</option><option value="parent">Регулярная задача</option></select><ChevronDown size={15} /></label>
-            <label className="field">Ответственный *<input value={draft.assignee} onChange={(event) => setDraft({ ...draft, assignee: event.target.value })} placeholder="Имя или роль" /></label>
+            <div className="field"><span>Ответственный *</span><PersonSelect value={draft.assignee} onChange={(assignee) => setDraft({ ...draft, assignee })} people={people} onAddPerson={onAddPerson} onDeletePerson={onDeletePerson} /></div>
             {taskType === "subtask" && <label className="field field-wide">К какой задаче прикрепить<select value={draft.parentId || ""} onChange={(event) => setDraft({ ...draft, parentId: event.target.value || null })}><option value="">Выберите регулярную задачу</option>{parents.map((task) => <option key={task.id} value={task.id}>{task.title}</option>)}</select><ChevronDown size={15} /></label>}
             <label className="field">Периодичность<select value={draft.frequency} onChange={(event) => setDraft({ ...draft, frequency: event.target.value as RegularFrequency })}>{REGULAR_FREQUENCIES.map((frequency) => <option key={frequency.value} value={frequency.value}>{frequency.label}</option>)}</select><ChevronDown size={15} /></label>
             <label className="field">Дата первого выполнения<input type="date" value={draft.anchorDate} onChange={(event) => setDraft({ ...draft, anchorDate: event.target.value })} /></label>
@@ -782,8 +1025,23 @@ export default function Dashboard({ initialData }: { initialData: DashboardData 
   }), []);
   const regularRows = useMemo(() => orderedRegularTasks(data.regularTasks).filter((task) => !task.parentId || !collapsedRegularIds.has(task.parentId)), [data.regularTasks, collapsedRegularIds]);
 
+  function addPerson(person: string) {
+    const normalized = normalizePerson(person);
+    if (!normalized || data.people.some((item) => item.toLocaleLowerCase("ru") === normalized.toLocaleLowerCase("ru"))) return;
+    commit((current) => ({ ...current, people: mergePeople(current.people, [normalized]) }));
+  }
+
+  function deletePerson(person: string) {
+    const key = person.toLocaleLowerCase("ru");
+    commit((current) => ({ ...current, people: current.people.filter((item) => item.toLocaleLowerCase("ru") !== key) }));
+  }
+
   function saveTask(task: Task) {
-    commit((current) => ({ ...current, tasks: current.tasks.some((item) => item.id === task.id) ? current.tasks.map((item) => item.id === task.id ? task : item) : [...current.tasks, task] }));
+    commit((current) => ({
+      ...current,
+      people: mergePeople(current.people, [task.assignee]),
+      tasks: current.tasks.some((item) => item.id === task.id) ? current.tasks.map((item) => item.id === task.id ? task : item) : [...current.tasks, task],
+    }));
     setModal(null);
   }
 
@@ -794,7 +1052,11 @@ export default function Dashboard({ initialData }: { initialData: DashboardData 
   }
 
   function saveIdea(idea: Idea) {
-    commit((current) => ({ ...current, ideas: current.ideas.some((item) => item.id === idea.id) ? current.ideas.map((item) => item.id === idea.id ? idea : item) : [...current.ideas, idea] }));
+    commit((current) => ({
+      ...current,
+      people: mergePeople(current.people, [idea.owner]),
+      ideas: current.ideas.some((item) => item.id === idea.id) ? current.ideas.map((item) => item.id === idea.id ? idea : item) : [...current.ideas, idea],
+    }));
     setModal(null);
   }
 
@@ -804,8 +1066,26 @@ export default function Dashboard({ initialData }: { initialData: DashboardData 
     setModal(null);
   }
 
-  function saveMeeting(meeting: Meeting) {
-    commit((current) => ({ ...current, meetings: current.meetings.some((item) => item.id === meeting.id) ? current.meetings.map((item) => item.id === meeting.id ? meeting : item) : [...current.meetings, meeting] }));
+  function saveMeeting(meeting: Meeting, repeat: MeetingRepeat) {
+    const repeatDates = getMeetingRepeatDates(meeting.plannedDate, repeat);
+    commit((current) => ({
+      ...current,
+      people: mergePeople(current.people, splitPeople(meeting.participants)),
+      meetings: current.meetings.some((item) => item.id === meeting.id)
+        ? current.meetings.map((item) => item.id === meeting.id ? meeting : item)
+        : repeat === "none"
+        ? [...current.meetings, meeting]
+        : [...current.meetings, ...repeatDates.map((plannedDate, index) => ({
+            ...meeting,
+            id: index === 0 ? meeting.id : crypto.randomUUID(),
+            plannedDate,
+            status: "planned" as const,
+            actualDate: "",
+            actualTime: "",
+            duration: "" as const,
+            outcome: "",
+          }))],
+    }));
     setSelectedDate(meeting.plannedDate);
     setCalendarMonth(new Date(parseDate(meeting.plannedDate).getFullYear(), parseDate(meeting.plannedDate).getMonth(), 1, 12));
     setModal(null);
@@ -820,6 +1100,7 @@ export default function Dashboard({ initialData }: { initialData: DashboardData 
   function saveRegularTask(task: RegularTask) {
     commit((current) => ({
       ...current,
+      people: mergePeople(current.people, [task.assignee]),
       regularTasks: current.regularTasks.some((item) => item.id === task.id)
         ? current.regularTasks.map((item) => item.id === task.id ? task : item)
         : [...current.regularTasks, task],
@@ -907,6 +1188,10 @@ export default function Dashboard({ initialData }: { initialData: DashboardData 
           {saveStatus === "saving" || saveStatus === "loading" ? <LoaderCircle size={14} className="spin" /> : saveStatus === "error" ? <CircleAlert size={14} /> : <Check size={14} />}
           {saveStatus === "loading" ? "Загрузка" : saveStatus === "saving" ? "Сохранение" : saveStatus === "error" ? "Ошибка сохранения" : "Сохранено"}
         </div>
+        <a className="company-link" href="https://finguin.agency/" target="_blank" rel="noreferrer">
+          <span>Финансовые директора</span>
+          <Image className="company-logo" src="/finguin-logo.png" alt="Finguin" width={112} height={45} />
+        </a>
       </header>
 
       <section className={"planning-banner " + (hasTwoMonthPlan ? "planning-ready" : "planning-missing")} aria-live="polite">
@@ -1084,10 +1369,10 @@ export default function Dashboard({ initialData }: { initialData: DashboardData 
         </div>
       </section>
 
-      {modal?.kind === "task" && <TaskDialog item={modal.item} tasks={data.tasks} onClose={() => setModal(null)} onSave={saveTask} onDelete={deleteTask} />}
-      {modal?.kind === "idea" && <IdeaDialog item={modal.item} onClose={() => setModal(null)} onSave={saveIdea} onDelete={deleteIdea} />}
-      {modal?.kind === "meeting" && <MeetingDialog item={modal.item} defaultDate={calendarDefaultDate} onClose={() => setModal(null)} onSave={saveMeeting} onDelete={deleteMeeting} />}
-      {modal?.kind === "regular-task" && <RegularTaskDialog item={modal.item} tasks={data.regularTasks} onClose={() => setModal(null)} onSave={saveRegularTask} onDelete={deleteRegularTask} />}
+      {modal?.kind === "task" && <TaskDialog item={modal.item} tasks={data.tasks} people={data.people} onAddPerson={addPerson} onDeletePerson={deletePerson} onClose={() => setModal(null)} onSave={saveTask} onDelete={deleteTask} />}
+      {modal?.kind === "idea" && <IdeaDialog item={modal.item} people={data.people} onAddPerson={addPerson} onDeletePerson={deletePerson} onClose={() => setModal(null)} onSave={saveIdea} onDelete={deleteIdea} />}
+      {modal?.kind === "meeting" && <MeetingDialog item={modal.item} defaultDate={calendarDefaultDate} people={data.people} onAddPerson={addPerson} onDeletePerson={deletePerson} onClose={() => setModal(null)} onSave={saveMeeting} onDelete={deleteMeeting} />}
+      {modal?.kind === "regular-task" && <RegularTaskDialog item={modal.item} tasks={data.regularTasks} people={data.people} onAddPerson={addPerson} onDeletePerson={deletePerson} onClose={() => setModal(null)} onSave={saveRegularTask} onDelete={deleteRegularTask} />}
       {modal?.kind === "regular-period" && <RegularPeriodDialog task={modal.task} monthStart={modal.monthStart} onClose={() => setModal(null)} onSave={saveRegularTask} />}
     </main>
   );

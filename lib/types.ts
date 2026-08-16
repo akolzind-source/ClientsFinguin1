@@ -74,6 +74,7 @@ export interface Meeting {
 
 export interface DashboardData {
   clientName: string;
+  people: string[];
   tasks: Task[];
   ideas: Idea[];
   meetings: Meeting[];

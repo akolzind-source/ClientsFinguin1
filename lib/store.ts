@@ -8,6 +8,31 @@ import type { DashboardData } from "./types";
 
 const localDataPath = path.join(process.cwd(), "work", "dashboard-data.json");
 
+function normalizePerson(value: string) {
+  return value.trim().replace(/\s+/g, " ");
+}
+
+function uniquePeople(values: string[]) {
+  const seen = new Set<string>();
+  return values.reduce<string[]>((result, item) => {
+    const person = normalizePerson(item);
+    const key = person.toLocaleLowerCase("ru");
+    if (!person || seen.has(key)) return result;
+    seen.add(key);
+    result.push(person);
+    return result;
+  }, []);
+}
+
+function derivePeople(value: Partial<DashboardData>) {
+  return uniquePeople([
+    ...(value.tasks || []).map((task) => task.assignee),
+    ...(value.ideas || []).map((idea) => idea.owner),
+    ...(value.regularTasks || []).map((task) => task.assignee),
+    ...(value.meetings || []).flatMap((meeting) => meeting.participants.split(",")),
+  ]);
+}
+
 function normalizeDashboardData(value: Partial<DashboardData>): DashboardData {
   return {
     ...structuredClone(DEFAULT_DATA),
@@ -15,7 +40,8 @@ function normalizeDashboardData(value: Partial<DashboardData>): DashboardData {
     tasks: Array.isArray(value.tasks) ? value.tasks : structuredClone(DEFAULT_DATA.tasks),
     ideas: Array.isArray(value.ideas) ? value.ideas : structuredClone(DEFAULT_DATA.ideas),
     meetings: Array.isArray(value.meetings) ? value.meetings.map((meeting) => ({ ...meeting, duration: meeting.duration || "" })) : structuredClone(DEFAULT_DATA.meetings),
-    regularTasks: Array.isArray(value.regularTasks) ? value.regularTasks : structuredClone(DEFAULT_DATA.regularTasks)
+    regularTasks: Array.isArray(value.regularTasks) ? value.regularTasks : structuredClone(DEFAULT_DATA.regularTasks),
+    people: Array.isArray(value.people) ? uniquePeople(value.people) : derivePeople(value)
   };
 }
 
