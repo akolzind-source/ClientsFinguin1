@@ -620,7 +620,11 @@ export default function Dashboard({ initialData }: { initialData: DashboardData 
   const [modal, setModal] = useState<ModalState>(null);
   const [ganttFilter, setGanttFilter] = useState<"Все" | "В работе" | "Просрочено">("Все");
   const [collapsedTaskIds, setCollapsedTaskIds] = useState<Set<string>>(() => new Set());
-  const [collapsedRegularIds, setCollapsedRegularIds] = useState<Set<string>>(() => new Set());
+  const [collapsedRegularIds, setCollapsedRegularIds] = useState<Set<string>>(() => new Set(
+    initialData.regularTasks
+      .filter((task) => !task.parentId && initialData.regularTasks.some((child) => child.parentId === task.id))
+      .map((task) => task.id),
+  ));
   const [ideaSearch, setIdeaSearch] = useState("");
   const [ideaStatus, setIdeaStatus] = useState("Все статусы");
   const [ideaPriority, setIdeaPriority] = useState("Все приоритеты");
