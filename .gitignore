@@ -1,0 +1,8 @@
+node_modules
+.next
+.vercel
+.env*
+!.env.example
+work/dashboard-data.json
+*.log
+.DS_Store
