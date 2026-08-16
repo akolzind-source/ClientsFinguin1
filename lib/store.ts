@@ -41,6 +41,7 @@ function normalizeDashboardData(value: Partial<DashboardData>): DashboardData {
     ideas: Array.isArray(value.ideas) ? value.ideas : structuredClone(DEFAULT_DATA.ideas),
     meetings: Array.isArray(value.meetings) ? value.meetings.map((meeting) => ({ ...meeting, duration: meeting.duration || "" })) : structuredClone(DEFAULT_DATA.meetings),
     regularTasks: Array.isArray(value.regularTasks) ? value.regularTasks : structuredClone(DEFAULT_DATA.regularTasks),
+    reports: Array.isArray(value.reports) ? value.reports : structuredClone(DEFAULT_DATA.reports),
     people: Array.isArray(value.people) ? uniquePeople(value.people) : derivePeople(value)
   };
 }

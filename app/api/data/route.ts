@@ -12,11 +12,13 @@ function isDashboardData(value: unknown): value is DashboardData {
     && Array.isArray(candidate.ideas)
     && Array.isArray(candidate.meetings)
     && Array.isArray(candidate.regularTasks)
+    && Array.isArray(candidate.reports)
     && Array.isArray(candidate.people)
     && candidate.tasks.length <= 500
     && candidate.ideas.length <= 500
     && candidate.meetings.length <= 500
     && candidate.regularTasks.length <= 500
+    && candidate.reports.length <= 200
     && candidate.people.length <= 500
     && candidate.people.every((person) => typeof person === "string" && person.length <= 160);
 }

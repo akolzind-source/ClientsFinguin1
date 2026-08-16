@@ -20,6 +20,7 @@ import {
   X,
 } from "lucide-react";
 import Image from "next/image";
+import AccountingPolicy from "@/components/accounting-policy";
 import type { CSSProperties, FormEvent } from "react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type {
@@ -858,6 +859,8 @@ function RegularPeriodDialog({
 
 export default function Dashboard({ initialData }: { initialData: DashboardData }) {
   const [data, setData] = useState<DashboardData>(initialData);
+  const [activePage, setActivePage] = useState<"roadmap" | "policy">("roadmap");
+  const [pageMenuOpen, setPageMenuOpen] = useState(false);
   const [saveStatus, setSaveStatus] = useState<SaveStatus>("loading");
   const [storageMode, setStorageMode] = useState<"postgres" | "local">("local");
   const [modal, setModal] = useState<ModalState>(null);
@@ -1175,7 +1178,48 @@ export default function Dashboard({ initialData }: { initialData: DashboardData 
   return (
     <main className="dashboard-shell">
       <header className="topbar">
-        <h1>Дорожная карта</h1>
+        <div
+          className="page-switcher"
+          onBlur={(event) => {
+            if (!event.currentTarget.contains(event.relatedTarget as Node | null)) setPageMenuOpen(false);
+          }}
+        >
+          <button
+            className="page-switcher-trigger"
+            type="button"
+            aria-haspopup="menu"
+            aria-expanded={pageMenuOpen}
+            onClick={() => setPageMenuOpen((current) => !current)}
+            onKeyDown={(event) => {
+              if (event.key === "Escape") setPageMenuOpen(false);
+            }}
+          >
+            <h1>{activePage === "roadmap" ? "Дорожная карта" : "Учетная политика"}</h1>
+            <ChevronDown size={20} aria-hidden="true" />
+          </button>
+          {pageMenuOpen ? (
+            <div className="page-switcher-menu" role="menu" aria-label="Разделы проекта">
+              <button
+                type="button"
+                role="menuitem"
+                className={activePage === "roadmap" ? "active" : ""}
+                onClick={() => { setActivePage("roadmap"); setPageMenuOpen(false); }}
+              >
+                Дорожная карта
+                {activePage === "roadmap" ? <Check size={16} aria-hidden="true" /> : null}
+              </button>
+              <button
+                type="button"
+                role="menuitem"
+                className={activePage === "policy" ? "active" : ""}
+                onClick={() => { setActivePage("policy"); setPageMenuOpen(false); }}
+              >
+                Учетная политика
+                {activePage === "policy" ? <Check size={16} aria-hidden="true" /> : null}
+              </button>
+            </div>
+          ) : null}
+        </div>
         <span className="divider" />
         {editingClient ? (
           <form className="client-edit" onSubmit={(event) => { event.preventDefault(); saveClientName(); }}>
@@ -1189,10 +1233,12 @@ export default function Dashboard({ initialData }: { initialData: DashboardData 
           {saveStatus === "loading" ? "Загрузка" : saveStatus === "saving" ? "Сохранение" : saveStatus === "error" ? "Ошибка сохранения" : "Сохранено"}
         </div>
         <a className="company-link" href="https://finguin.agency/" target="_blank" rel="noreferrer">
-          <span>Финансовые директора</span>
-          <Image className="company-logo" src="/finguin-logo.png" alt="Finguin" width={112} height={45} />
+          <span>Финансовые директора Finguin</span>
+          <Image className="company-logo" src="/finguin-mark.png" alt="Логотип Finguin" width={592} height={592} />
         </a>
       </header>
+
+      {activePage === "roadmap" ? <>
 
       <section className={"planning-banner " + (hasTwoMonthPlan ? "planning-ready" : "planning-missing")} aria-live="polite">
         <span className="planning-icon">{hasTwoMonthPlan ? <Check size={18} /> : <CircleAlert size={18} />}</span>
@@ -1368,6 +1414,7 @@ export default function Dashboard({ initialData }: { initialData: DashboardData 
           </div>
         </div>
       </section>
+      </> : <AccountingPolicy reports={data.reports} people={data.people} onChange={(reports) => commit((current) => ({ ...current, reports }))} />}
 
       {modal?.kind === "task" && <TaskDialog item={modal.item} tasks={data.tasks} people={data.people} onAddPerson={addPerson} onDeletePerson={deletePerson} onClose={() => setModal(null)} onSave={saveTask} onDelete={deleteTask} />}
       {modal?.kind === "idea" && <IdeaDialog item={modal.item} people={data.people} onAddPerson={addPerson} onDeletePerson={deletePerson} onClose={() => setModal(null)} onSave={saveIdea} onDelete={deleteIdea} />}

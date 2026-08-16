@@ -17,6 +17,30 @@ export type Priority = "Высокий" | "Средний" | "Низкий";
 export type MeetingStatus = "planned" | "completed" | "cancelled";
 export type MeetingDuration = "Меньше получаса" | "Час" | "2 часа";
 export type RegularFrequency = "weekly" | "monthly" | "quarterly";
+export type ReportStatus = "Работает" | "В разработке" | "Не используется";
+
+export interface AccountingReportVariant {
+  id: string;
+  title: string;
+  url: string;
+}
+
+export interface AccountingReport {
+  id: string;
+  title: string;
+  icon: string;
+  assignee: string;
+  deadline: string;
+  status: ReportStatus;
+  essence: string;
+  sources: string;
+  closingStages: string;
+  variants: string;
+  variantLinks?: AccountingReportVariant[];
+  accountingFeatures: string;
+  attributes: string;
+  referenceMaterials: string;
+}
 
 export interface RegularRecord {
   actualDate: string;
@@ -79,4 +103,5 @@ export interface DashboardData {
   ideas: Idea[];
   meetings: Meeting[];
   regularTasks: RegularTask[];
+  reports: AccountingReport[];
 }
