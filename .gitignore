@@ -6,3 +6,4 @@ node_modules
 work/dashboard-data.json
 *.log
 .DS_Store
+tsconfig.tsbuildinfo

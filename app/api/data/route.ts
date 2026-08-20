@@ -1,4 +1,4 @@
-import { getDashboardData, saveDashboardData } from "@/lib/store";
+import { DatabaseNotConfiguredError, getDashboardData, resolveDatabaseUrl, saveDashboardData } from "@/lib/store";
 import type { DashboardData } from "@/lib/types";
 
 export const dynamic = "force-dynamic";
@@ -27,10 +27,13 @@ export async function GET() {
   try {
     const data = await getDashboardData();
     return Response.json(
-      { data, storage: process.env.DATABASE_URL ? "postgres" : "local" },
+      { data, storage: resolveDatabaseUrl() ? "postgres" : "local" },
       { headers: { "Cache-Control": "no-store" } }
     );
   } catch (error) {
+    if (error instanceof DatabaseNotConfiguredError) {
+      return Response.json({ error: error.message }, { status: 503 });
+    }
     console.error("Failed to load dashboard data", error);
     return Response.json({ error: "Не удалось загрузить данные" }, { status: 500 });
   }
@@ -51,7 +54,10 @@ export async function PUT(request: Request) {
     await saveDashboardData(payload.data);
     return Response.json({ ok: true, savedAt: new Date().toISOString() });
   } catch (error) {
+    if (error instanceof DatabaseNotConfiguredError) {
+      return Response.json({ error: error.message }, { status: 503 });
+    }
     console.error("Failed to save dashboard data", error);
-    return Response.json({ error: "Не удалось сохранить изменения" }, { status: 500 });
+    return Response.json({ error: "Не удалось сохранить изменения. Проверьте подключение базы данных на /api/health" }, { status: 500 });
   }
 }

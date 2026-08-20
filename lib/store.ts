@@ -8,6 +8,49 @@ import type { DashboardData } from "./types";
 
 const localDataPath = path.join(process.cwd(), "work", "dashboard-data.json");
 
+const isVercel = process.env.VERCEL === "1";
+
+// Vercel's Neon/Postgres integrations name variables differently depending on
+// how the storage was connected (plain env var, Storage tab with a custom
+// prefix, etc). Rather than requiring one exact name, prefer the well-known
+// ones and otherwise scan all env vars for a usable Postgres URL.
+const KNOWN_DATABASE_URL_NAMES = ["DATABASE_URL", "POSTGRES_URL", "DATABASE_POSTGRES_URL"];
+const PLACEHOLDER_URL_PATTERNS = [/example\.com/i, /user:pass/i, /:pass(word)?@/i];
+
+function isUsablePostgresUrl(value: string | undefined): value is string {
+  if (!value) return false;
+  if (!/^postgres(ql)?:\/\//i.test(value)) return false;
+  return !PLACEHOLDER_URL_PATTERNS.some((pattern) => pattern.test(value));
+}
+
+export type DatabaseUrlSource = { envName: string; url: string } | null;
+
+export function resolveDatabaseUrl(): DatabaseUrlSource {
+  for (const name of KNOWN_DATABASE_URL_NAMES) {
+    const value = process.env[name];
+    if (isUsablePostgresUrl(value)) return { envName: name, url: value };
+  }
+
+  const candidates = Object.entries(process.env).filter(
+    (entry): entry is [string, string] => isUsablePostgresUrl(entry[1])
+  );
+  if (candidates.length === 0) return null;
+
+  const pooled = candidates.find(([name, url]) => /pool/i.test(name) || /-pooler\./i.test(url));
+  const [envName, url] = pooled ?? candidates[0];
+  return { envName, url };
+}
+
+export class DatabaseNotConfiguredError extends Error {
+  constructor() {
+    super(
+      "База данных не подключена: не найдена рабочая переменная окружения с адресом Postgres. " +
+        "Подключите Neon в Vercel → Storage и сделайте redeploy."
+    );
+    this.name = "DatabaseNotConfiguredError";
+  }
+}
+
 function normalizePerson(value: string) {
   return value.trim().replace(/\s+/g, " ");
 }
@@ -47,10 +90,10 @@ function normalizeDashboardData(value: Partial<DashboardData>): DashboardData {
 }
 
 async function ensureTable() {
-  const databaseUrl = process.env.DATABASE_URL;
-  if (!databaseUrl) return null;
+  const source = resolveDatabaseUrl();
+  if (!source) return null;
 
-  const sql = neon(databaseUrl);
+  const sql = neon(source.url);
   await sql`CREATE TABLE IF NOT EXISTS dashboard_state (
     id INTEGER PRIMARY KEY,
     data JSONB NOT NULL,
@@ -70,6 +113,8 @@ export async function getDashboardData(): Promise<DashboardData> {
     return normalizeDashboardData(rows[0].data as Partial<DashboardData>);
   }
 
+  if (isVercel) throw new DatabaseNotConfiguredError();
+
   try {
     return normalizeDashboardData(JSON.parse(await fs.readFile(localDataPath, "utf8")) as Partial<DashboardData>);
   } catch {
@@ -88,6 +133,8 @@ export async function saveDashboardData(data: DashboardData): Promise<void> {
       ON CONFLICT (id) DO UPDATE SET data = EXCLUDED.data, updated_at = NOW()`;
     return;
   }
+
+  if (isVercel) throw new DatabaseNotConfiguredError();
 
   await fs.mkdir(path.dirname(localDataPath), { recursive: true });
   const temporaryPath = localDataPath + ".tmp";

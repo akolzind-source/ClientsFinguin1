@@ -863,6 +863,7 @@ export default function Dashboard({ initialData }: { initialData: DashboardData 
   const [activePage, setActivePage] = useState<"roadmap" | "policy">("roadmap");
   const [pageMenuOpen, setPageMenuOpen] = useState(false);
   const [saveStatus, setSaveStatus] = useState<SaveStatus>("loading");
+  const [saveErrorMessage, setSaveErrorMessage] = useState("");
   const [storageMode, setStorageMode] = useState<"postgres" | "local">("local");
   const [modal, setModal] = useState<ModalState>(null);
   const [ganttFilter, setGanttFilter] = useState<"Все" | "В работе" | "Просрочено">("Все");
@@ -886,8 +887,9 @@ export default function Dashboard({ initialData }: { initialData: DashboardData 
     const controller = new AbortController();
     fetch("/api/data", { cache: "no-store", signal: controller.signal })
       .then(async (response) => {
-        if (!response.ok) throw new Error("Load failed");
-        return response.json() as Promise<{ data: DashboardData; storage: "postgres" | "local" }>;
+        const payload = (await response.json()) as { data: DashboardData; storage: "postgres" | "local" } & { error?: string };
+        if (!response.ok) throw new Error(payload.error || "Не удалось загрузить данные");
+        return payload as { data: DashboardData; storage: "postgres" | "local" };
       })
       .then((payload) => {
         setData(payload.data);
@@ -896,7 +898,10 @@ export default function Dashboard({ initialData }: { initialData: DashboardData 
         setSaveStatus("saved");
       })
       .catch((error: Error) => {
-        if (error.name !== "AbortError") setSaveStatus("error");
+        if (error.name !== "AbortError") {
+          setSaveErrorMessage(error.message);
+          setSaveStatus("error");
+        }
       });
     return () => controller.abort();
   }, []);
@@ -909,9 +914,11 @@ export default function Dashboard({ initialData }: { initialData: DashboardData 
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ data: nextData }),
       });
-      if (!response.ok) throw new Error("Save failed");
+      const payload = (await response.json().catch(() => ({}))) as { error?: string };
+      if (!response.ok) throw new Error(payload.error || "Не удалось сохранить изменения");
       setSaveStatus("saved");
-    } catch {
+    } catch (error) {
+      setSaveErrorMessage(error instanceof Error ? error.message : "Не удалось сохранить изменения");
       setSaveStatus("error");
     }
   }, []);
@@ -1229,7 +1236,10 @@ export default function Dashboard({ initialData }: { initialData: DashboardData 
         ) : (
           <button className="client-name" onClick={() => setEditingClient(true)}>{data.clientName}<Pencil size={14} /></button>
         )}
-        <div className={"save-indicator save-" + saveStatus} title={storageMode === "postgres" ? "Данные сохраняются в PostgreSQL" : "Локальный режим разработки"}>
+        <div
+          className={"save-indicator save-" + saveStatus}
+          title={saveStatus === "error" ? saveErrorMessage : storageMode === "postgres" ? "Данные сохраняются в PostgreSQL" : "Локальный режим разработки"}
+        >
           {saveStatus === "saving" || saveStatus === "loading" ? <LoaderCircle size={14} className="spin" /> : saveStatus === "error" ? <CircleAlert size={14} /> : <Check size={14} />}
           {saveStatus === "loading" ? "Загрузка" : saveStatus === "saving" ? "Сохранение" : saveStatus === "error" ? "Ошибка сохранения" : "Сохранено"}
         </div>
