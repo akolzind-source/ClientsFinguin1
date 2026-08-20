@@ -52,7 +52,8 @@ const MEETING_REPEATS: Array<{ value: MeetingRepeat; label: string }> = [
   { value: "monthly", label: "Каждый месяц" },
   { value: "quarterly", label: "Каждый квартал" },
 ];
-const TODAY = new Date(2026, 7, 16, 12);
+const now = new Date();
+const TODAY = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 12);
 const MONTHS = ["Январь", "Февраль", "Март", "Апрель", "Май", "Июнь", "Июль", "Август", "Сентябрь", "Октябрь", "Ноябрь", "Декабрь"];
 const MONTHS_GENITIVE = ["января", "февраля", "марта", "апреля", "мая", "июня", "июля", "августа", "сентября", "октября", "ноября", "декабря"];
 
