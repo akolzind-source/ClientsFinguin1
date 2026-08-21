@@ -103,6 +103,10 @@ export interface Meeting {
   duration: MeetingDuration | "";
   outcome: string;
   comments: string[];
+  // Повторяющиеся встречи остаются самостоятельными записями, но помнят свою серию:
+  // это даёт удаление и правку «этой», «этой и последующих» или «всей серии».
+  seriesId?: string;
+  seriesFrequency?: RegularFrequency;
 }
 
 export interface DashboardData {

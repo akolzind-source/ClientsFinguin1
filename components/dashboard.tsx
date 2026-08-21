@@ -22,6 +22,15 @@ import {
 } from "lucide-react";
 import Image from "next/image";
 import AccountingPolicy from "@/components/accounting-policy";
+import { addDays, differenceInDays, parseDate, toISO } from "@/lib/dates";
+import {
+  frequencyTitle,
+  getScopeCounts,
+  getSeriesOccurrences,
+  isSeriesMeeting,
+  selectSeriesScope,
+} from "@/lib/meeting-series";
+import type { MeetingSeriesScope } from "@/lib/meeting-series";
 import type { CSSProperties, FormEvent } from "react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type {
@@ -46,7 +55,7 @@ const REGULAR_FREQUENCIES: Array<{ value: RegularFrequency; label: string }> = [
   { value: "monthly", label: "Каждый месяц" },
   { value: "quarterly", label: "Каждый квартал" },
 ];
-type MeetingRepeat = "none" | "weekly" | "monthly" | "quarterly";
+type MeetingRepeat = "none" | RegularFrequency;
 const MEETING_REPEATS: Array<{ value: MeetingRepeat; label: string }> = [
   { value: "none", label: "Не повторяется" },
   { value: "weekly", label: "Каждую неделю" },
@@ -66,19 +75,6 @@ type ModalState =
   | { kind: "regular-task"; item: RegularTask | null }
   | { kind: "regular-period"; task: RegularTask; monthStart: string }
   | null;
-
-function parseDate(value: string) {
-  if (!value) return new Date(NaN);
-  const [year, month, day] = value.split("-").map(Number);
-  return new Date(year, month - 1, day, 12);
-}
-
-function toISO(date: Date) {
-  const year = date.getFullYear();
-  const month = String(date.getMonth() + 1).padStart(2, "0");
-  const day = String(date.getDate()).padStart(2, "0");
-  return year + "-" + month + "-" + day;
-}
 
 function formatShortDate(value: string) {
   const date = parseDate(value);
@@ -114,10 +110,13 @@ function getMeetingRepeatDates(startValue: string, repeat: MeetingRepeat) {
   return dates;
 }
 
-function addDays(value: string, days: number) {
-  const date = parseDate(value);
-  date.setDate(date.getDate() + days);
-  return toISO(date);
+function pluralMeetings(count: number) {
+  const lastTwo = count % 100;
+  const last = count % 10;
+  if (lastTwo >= 11 && lastTwo <= 14) return "встреч";
+  if (last === 1) return "встреча";
+  if (last >= 2 && last <= 4) return "встречи";
+  return "встреч";
 }
 
 function pluralDays(count: number) {
@@ -657,6 +656,7 @@ function MeetingDialog({
   item,
   defaultDate,
   people,
+  seriesCount,
   onAddPerson,
   onDeletePerson,
   onClose,
@@ -666,6 +666,7 @@ function MeetingDialog({
   item: Meeting | null;
   defaultDate: string;
   people: string[];
+  seriesCount: number;
   onAddPerson: (person: string) => void;
   onDeletePerson: (person: string) => void;
   onClose: () => void;
@@ -712,6 +713,12 @@ function MeetingDialog({
     <ModalShell title={item ? "Встреча" : "Запланировать встречу"} subtitle="Плановая и фактическая даты отображаются в календаре" onClose={onClose}>
       <form onSubmit={submit}>
         <div className="modal-body">
+          {item?.seriesId && seriesCount > 1 && (
+            <p className="series-banner">
+              <Repeat2 size={14} />
+              <span>Встреча из серии «{item.seriesFrequency ? frequencyTitle(item.seriesFrequency) : "повторяется"}» — всего {seriesCount} {pluralMeetings(seriesCount)}. При сохранении и удалении можно выбрать, затронуть только эту встречу, её и последующие или всю серию.</span>
+            </p>
+          )}
           <label className="field field-wide">Тема встречи<input autoFocus value={draft.title} onChange={(event) => setDraft({ ...draft, title: event.target.value })} placeholder="Например, Статус-встреча по проекту" /></label>
           <div className="form-grid">
             <label className="field">Плановая дата<input type="date" value={draft.plannedDate} onChange={(event) => setDraft({ ...draft, plannedDate: event.target.value })} /></label>
@@ -742,6 +749,65 @@ function MeetingDialog({
           <div><button type="button" className="secondary" onClick={onClose}>Отмена</button><button type="submit" className="primary">Сохранить</button></div>
         </footer>
       </form>
+    </ModalShell>
+  );
+}
+
+const SCOPE_OPTIONS: Array<{ value: MeetingSeriesScope; label: string; hint: string }> = [
+  { value: "single", label: "Только эту встречу", hint: "Остальные встречи серии останутся как есть." },
+  { value: "following", label: "Эту и все последующие", hint: "Эта встреча и все более поздние в серии." },
+  { value: "all", label: "Все встречи серии", hint: "Вся серия целиком, включая уже прошедшие встречи." },
+];
+
+function MeetingScopeDialog({
+  mode,
+  meeting,
+  counts,
+  onCancel,
+  onConfirm,
+}: {
+  mode: "delete" | "edit";
+  meeting: Meeting;
+  counts: Record<MeetingSeriesScope, number>;
+  onCancel: () => void;
+  onConfirm: (scope: MeetingSeriesScope) => void;
+}) {
+  // Удаление чаще всего нужно «наперёд» — регулярная встреча отвалилась и больше не собирается;
+  // правка же по умолчанию касается только выбранной встречи.
+  const [scope, setScope] = useState<MeetingSeriesScope>(mode === "delete" ? "following" : "single");
+  const frequency = meeting.seriesFrequency ? frequencyTitle(meeting.seriesFrequency) : "повторяется";
+
+  return (
+    <ModalShell
+      title={mode === "delete" ? "Удалить повторяющуюся встречу" : "Изменить повторяющуюся встречу"}
+      subtitle={"«" + meeting.title + "» · " + frequency + " · " + counts.all + " " + pluralMeetings(counts.all) + " в серии"}
+      onClose={onCancel}
+    >
+      <div className="modal-body">
+        <div className="scope-options">
+          {SCOPE_OPTIONS.map((option) => (
+            <label key={option.value} className={"scope-option" + (scope === option.value ? " is-active" : "")}>
+              <input type="radio" name="meeting-scope" checked={scope === option.value} onChange={() => setScope(option.value)} />
+              <span className="scope-copy"><b>{option.label}</b><small>{option.hint}</small></span>
+              <em>{counts[option.value]} {pluralMeetings(counts[option.value])}</em>
+            </label>
+          ))}
+        </div>
+        <p className="field-note scope-note">
+          {mode === "delete"
+            ? "Удаление отменить нельзя: вместе со встречами пропадут их итоги и комментарии."
+            : "По серии обновляются тема, время, участники и повестка. Перенос даты сдвигает выбранные встречи на столько же дней; статусы, итоги и комментарии остаются у каждой встречи своими."}
+        </p>
+      </div>
+      <footer className="modal-actions">
+        <span />
+        <div>
+          <button type="button" className="secondary" onClick={onCancel}>Отмена</button>
+          <button type="button" className={mode === "delete" ? "primary danger-button" : "primary"} onClick={() => onConfirm(scope)}>
+            {mode === "delete" ? "Удалить" : "Сохранить"}
+          </button>
+        </div>
+      </footer>
     </ModalShell>
   );
 }
@@ -882,6 +948,9 @@ export default function Dashboard({ initialData }: { initialData: DashboardData 
   const [saveErrorMessage, setSaveErrorMessage] = useState("");
   const [storageMode, setStorageMode] = useState<"postgres" | "local">("local");
   const [modal, setModal] = useState<ModalState>(null);
+  // Выбор охвата для встречи из серии: удалить/поправить одну, хвост или всю серию.
+  // Карточка встречи на это время закрывается, а её черновик ждёт здесь.
+  const [seriesPrompt, setSeriesPrompt] = useState<{ mode: "delete" | "edit"; meeting: Meeting; draft: Meeting | null } | null>(null);
   const [ganttFilter, setGanttFilter] = useState<"Все" | "В работе" | "Просрочено">("Все");
   const [baselineDate, setBaselineDate] = useState("");
   const [baselineMenuOpen, setBaselineMenuOpen] = useState(false);
@@ -1069,6 +1138,15 @@ export default function Dashboard({ initialData }: { initialData: DashboardData 
     });
   }, [calendarMonth, data.meetings]);
 
+  // Серии, в которых осталось больше одной встречи: только их помечаем в списке.
+  const activeSeriesIds = useMemo(() => {
+    const counts = new Map<string, number>();
+    for (const meeting of data.meetings) {
+      if (meeting.seriesId) counts.set(meeting.seriesId, (counts.get(meeting.seriesId) || 0) + 1);
+    }
+    return new Set([...counts.entries()].filter(([, count]) => count > 1).map(([seriesId]) => seriesId));
+  }, [data.meetings]);
+
   const displayedMeetings = useMemo(() => {
     const isInCalendarMonth = (value: string) => {
       const date = parseDate(value);
@@ -1134,18 +1212,47 @@ export default function Dashboard({ initialData }: { initialData: DashboardData 
     setModal(null);
   }
 
+  function focusMeetingDate(plannedDate: string) {
+    setSelectedDate(plannedDate);
+    setCalendarMonth(new Date(parseDate(plannedDate).getFullYear(), parseDate(plannedDate).getMonth(), 1, 12));
+  }
+
+  // Поля, одинаковые для всей серии: если правка их не трогает (например, встречу просто
+  // отметили проведённой), спрашивать про охват незачем.
+  function hasSeriesWideChanges(original: Meeting, draft: Meeting) {
+    return original.title !== draft.title
+      || original.plannedDate !== draft.plannedDate
+      || original.plannedTime !== draft.plannedTime
+      || original.participants !== draft.participants
+      || original.agenda !== draft.agenda;
+  }
+
   function saveMeeting(meeting: Meeting, repeat: MeetingRepeat) {
+    const original = data.meetings.find((item) => item.id === meeting.id);
+    if (original) {
+      if (isSeriesMeeting(data.meetings, original) && hasSeriesWideChanges(original, meeting)) {
+        setSeriesPrompt({ mode: "edit", meeting: original, draft: meeting });
+        setModal(null);
+        return;
+      }
+      applyMeetingEdit(meeting, original, "single");
+      return;
+    }
+
     const repeatDates = getMeetingRepeatDates(meeting.plannedDate, repeat);
+    // Все повторы остаются самостоятельными встречами, но получают общий seriesId,
+    // чтобы их потом можно было удалить или поправить пачкой.
+    const seriesId = repeat === "none" ? undefined : crypto.randomUUID();
     commit((current) => ({
       ...current,
       people: mergePeople(current.people, splitPeople(meeting.participants)),
-      meetings: current.meetings.some((item) => item.id === meeting.id)
-        ? current.meetings.map((item) => item.id === meeting.id ? meeting : item)
-        : repeat === "none"
+      meetings: repeat === "none"
         ? [...current.meetings, meeting]
         : [...current.meetings, ...repeatDates.map((plannedDate, index) => ({
             ...meeting,
             id: index === 0 ? meeting.id : crypto.randomUUID(),
+            seriesId,
+            seriesFrequency: repeat,
             plannedDate,
             status: "planned" as const,
             actualDate: "",
@@ -1154,14 +1261,56 @@ export default function Dashboard({ initialData }: { initialData: DashboardData 
             outcome: "",
           }))],
     }));
-    setSelectedDate(meeting.plannedDate);
-    setCalendarMonth(new Date(parseDate(meeting.plannedDate).getFullYear(), parseDate(meeting.plannedDate).getMonth(), 1, 12));
+    focusMeetingDate(meeting.plannedDate);
+    setModal(null);
+  }
+
+  function applyMeetingEdit(draft: Meeting, original: Meeting, scope: MeetingSeriesScope) {
+    commit((current) => {
+      const affected = new Set(selectSeriesScope(current.meetings, original, scope).map((item) => item.id));
+      const dayShift = differenceInDays(original.plannedDate, draft.plannedDate);
+      return {
+        ...current,
+        people: mergePeople(current.people, splitPeople(draft.participants)),
+        meetings: current.meetings.map((item) => {
+          if (item.id === draft.id) return draft;
+          if (!affected.has(item.id)) return item;
+          // По серии расходятся только общие поля: статус, факт и комментарии у каждой встречи свои.
+          return {
+            ...item,
+            title: draft.title,
+            plannedTime: draft.plannedTime,
+            participants: draft.participants,
+            agenda: draft.agenda,
+            plannedDate: dayShift === 0 ? item.plannedDate : addDays(item.plannedDate, dayShift),
+          };
+        }),
+      };
+    });
+    focusMeetingDate(draft.plannedDate);
+    setSeriesPrompt(null);
     setModal(null);
   }
 
   function deleteMeeting(id: string) {
+    const meeting = data.meetings.find((item) => item.id === id);
+    if (!meeting) return;
+    if (isSeriesMeeting(data.meetings, meeting)) {
+      setSeriesPrompt({ mode: "delete", meeting, draft: null });
+      setModal(null);
+      return;
+    }
     if (!window.confirm("Удалить встречу?")) return;
-    commit((current) => ({ ...current, meetings: current.meetings.filter((meeting) => meeting.id !== id) }));
+    commit((current) => ({ ...current, meetings: current.meetings.filter((item) => item.id !== id) }));
+    setModal(null);
+  }
+
+  function applyMeetingDeletion(meeting: Meeting, scope: MeetingSeriesScope) {
+    commit((current) => {
+      const removed = new Set(selectSeriesScope(current.meetings, meeting, scope).map((item) => item.id));
+      return { ...current, meetings: current.meetings.filter((item) => !removed.has(item.id)) };
+    });
+    setSeriesPrompt(null);
     setModal(null);
   }
 
@@ -1469,7 +1618,7 @@ export default function Dashboard({ initialData }: { initialData: DashboardData 
                 return (
                 <button className="meeting-item" key={meeting.id} onClick={() => setModal({ kind: "meeting", item: meeting })}>
                   <time className={isFactOccurrence ? "meeting-fact" : "meeting-plan"}><b>{parseDate(occurrenceDate).getDate()}</b><span>{MONTHS_GENITIVE[parseDate(occurrenceDate).getMonth()].slice(0, 3)}</span></time>
-                  <span className="meeting-copy"><small>{occurrenceTime}</small><b>{meeting.title}</b><span className="occurrence-badges">{isPlanOccurrence && <i className="occurrence-plan">План</i>}{isFactOccurrence && <i className="occurrence-fact">Факт</i>}<em>{statusLabel}</em></span></span>
+                  <span className="meeting-copy"><small>{occurrenceTime}</small><b>{meeting.title}</b><span className="occurrence-badges">{isPlanOccurrence && <i className="occurrence-plan">План</i>}{isFactOccurrence && <i className="occurrence-fact">Факт</i>}{meeting.seriesId && activeSeriesIds.has(meeting.seriesId) && <i className="occurrence-series"><Repeat2 size={9} />{meeting.seriesFrequency ? frequencyLabel(meeting.seriesFrequency) : "Серия"}</i>}<em>{statusLabel}</em></span></span>
                   {meeting.comments.length > 0 && <span className="comment-count"><MessageSquareText size={13} />{meeting.comments.length}</span>}
                   <MoreHorizontal size={15} />
                 </button>
@@ -1537,7 +1686,23 @@ export default function Dashboard({ initialData }: { initialData: DashboardData 
 
       {modal?.kind === "task" && <TaskDialog item={modal.item} tasks={data.tasks} people={data.people} onAddPerson={addPerson} onDeletePerson={deletePerson} onClose={() => setModal(null)} onSave={saveTask} onDelete={deleteTask} />}
       {modal?.kind === "idea" && <IdeaDialog item={modal.item} people={data.people} onAddPerson={addPerson} onDeletePerson={deletePerson} onClose={() => setModal(null)} onSave={saveIdea} onDelete={deleteIdea} />}
-      {modal?.kind === "meeting" && <MeetingDialog item={modal.item} defaultDate={calendarDefaultDate} people={data.people} onAddPerson={addPerson} onDeletePerson={deletePerson} onClose={() => setModal(null)} onSave={saveMeeting} onDelete={deleteMeeting} />}
+      {modal?.kind === "meeting" && <MeetingDialog item={modal.item} defaultDate={calendarDefaultDate} people={data.people} seriesCount={modal.item ? getSeriesOccurrences(data.meetings, modal.item).length : 1} onAddPerson={addPerson} onDeletePerson={deletePerson} onClose={() => setModal(null)} onSave={saveMeeting} onDelete={deleteMeeting} />}
+      {seriesPrompt && (
+        <MeetingScopeDialog
+          mode={seriesPrompt.mode}
+          meeting={seriesPrompt.meeting}
+          counts={getScopeCounts(data.meetings, seriesPrompt.meeting)}
+          onCancel={() => {
+            // Возвращаем карточку встречи вместе с несохранёнными правками.
+            setModal({ kind: "meeting", item: seriesPrompt.draft ?? seriesPrompt.meeting });
+            setSeriesPrompt(null);
+          }}
+          onConfirm={(scope) => {
+            if (seriesPrompt.mode === "delete") applyMeetingDeletion(seriesPrompt.meeting, scope);
+            else if (seriesPrompt.draft) applyMeetingEdit(seriesPrompt.draft, seriesPrompt.meeting, scope);
+          }}
+        />
+      )}
       {modal?.kind === "regular-task" && <RegularTaskDialog item={modal.item} tasks={data.regularTasks} people={data.people} onAddPerson={addPerson} onDeletePerson={deletePerson} onClose={() => setModal(null)} onSave={saveRegularTask} onDelete={deleteRegularTask} />}
       {modal?.kind === "regular-period" && <RegularPeriodDialog task={modal.task} monthStart={modal.monthStart} onClose={() => setModal(null)} onSave={saveRegularTask} />}
     </main>

@@ -873,6 +873,7 @@ button:focus-visible, input:focus-visible, select:focus-visible, textarea:focus-
 }
 .occurrence-badges .occurrence-plan { color: #175daa; background: #dceaff; }
 .occurrence-badges .occurrence-fact { color: #087555; background: #d9f3e8; }
+.occurrence-badges .occurrence-series { display: inline-flex; align-items: center; gap: 3px; color: #6544ad; background: #ece5ff; }
 .empty-meetings {
   min-height: 210px;
   padding: 28px;
@@ -1176,6 +1177,42 @@ button:focus-visible, input:focus-visible, select:focus-visible, textarea:focus-
 .modal-actions > div { display: flex; gap: 9px; }
 .delete-button { border: 0; background: transparent; color: var(--red); padding-left: 0; }
 .delete-button:hover { color: #c53237; }
+.primary.danger-button { background: var(--red); }
+.primary.danger-button:hover { background: #c53237; box-shadow: 0 4px 10px rgba(197, 50, 55, .2); }
+.series-banner {
+  margin: 0 0 14px;
+  padding: 10px 12px;
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  border: 1px solid #ded3ff;
+  border-radius: 9px;
+  background: #f6f2ff;
+  color: #55429b;
+  font-size: 11px;
+  line-height: 1.45;
+}
+.series-banner > svg { flex: none; margin-top: 1px; }
+.scope-options { display: flex; flex-direction: column; gap: 8px; }
+.scope-option {
+  padding: 11px 13px;
+  display: grid;
+  grid-template-columns: auto 1fr auto;
+  align-items: center;
+  gap: 10px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: #fff;
+  cursor: pointer;
+}
+.scope-option:hover { background: #f8fafc; }
+.scope-option.is-active { border-color: var(--blue); background: var(--blue-soft); }
+.scope-option input { width: 15px; height: 15px; accent-color: #0b3478; }
+.scope-copy { min-width: 0; display: flex; flex-direction: column; gap: 2px; }
+.scope-copy b { font-size: 12px; }
+.scope-copy small { color: #7b8798; font-size: 10px; line-height: 1.35; }
+.scope-option em { color: #667386; font-size: 10px; font-style: normal; white-space: nowrap; }
+.scope-note { display: block; margin: 12px 0 0; }
 
 @media (max-width: 1280px) {
   .report-gallery { grid-template-columns: repeat(3, minmax(0, 1fr)); }

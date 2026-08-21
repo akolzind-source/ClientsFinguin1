@@ -4,6 +4,7 @@ import { promises as fs } from "node:fs";
 import path from "node:path";
 import { neon } from "@neondatabase/serverless";
 import { DEFAULT_DATA } from "./default-data";
+import { linkLegacyMeetingSeries } from "./meeting-series";
 import type { Baselines, DashboardData, Task } from "./types";
 
 const localDataPath = path.join(process.cwd(), "work", "dashboard-data.json");
@@ -153,7 +154,9 @@ function normalizeDashboardData(value: Partial<DashboardData>): DashboardData {
     // тогда просто не показывает отклонений вместо пустого выпадающего списка.
     baselines: Object.keys(baselines).length > 0 ? baselines : { [todayKey()]: snapshotTaskDates(tasks) },
     ideas: Array.isArray(value.ideas) ? value.ideas : structuredClone(DEFAULT_DATA.ideas),
-    meetings: Array.isArray(value.meetings) ? value.meetings.map((meeting) => ({ ...meeting, duration: meeting.duration || "" })) : structuredClone(DEFAULT_DATA.meetings),
+    meetings: Array.isArray(value.meetings)
+      ? linkLegacyMeetingSeries(value.meetings.map((meeting) => ({ ...meeting, duration: meeting.duration || "" })))
+      : structuredClone(DEFAULT_DATA.meetings),
     regularTasks: Array.isArray(value.regularTasks) ? value.regularTasks : structuredClone(DEFAULT_DATA.regularTasks),
     reports: Array.isArray(value.reports) ? value.reports : structuredClone(DEFAULT_DATA.reports),
     people: Array.isArray(value.people) ? uniquePeople(value.people) : derivePeople(value)
