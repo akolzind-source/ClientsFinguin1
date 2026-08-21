@@ -72,25 +72,49 @@ function normalizeBaselines(value: unknown): Baselines {
   return value && typeof value === "object" && !Array.isArray(value) ? (value as Baselines) : {};
 }
 
+const DATE_KEY = /^\d{4}-\d{2}-\d{2}$/;
+// Сколько снимков разрешено дописать одним сохранением: фиксация базового плана задним числом
+// добавляет один, всё остальное — повод отбросить лишнее, а не раздувать историю.
+const BASELINE_INCOMING_LIMIT = 10;
+
+// Снимки, присланные клиентом (фиксация базового плана на выбранную дату). Берём только то,
+// что похоже на срез сроков; стереть уже накопленную историю таким запросом нельзя.
+function sanitizeIncomingBaselines(value: unknown): Baselines {
+  const entries = Object.entries(normalizeBaselines(value))
+    .filter(([key, snapshot]) => DATE_KEY.test(key) && snapshot && typeof snapshot === "object" && !Array.isArray(snapshot))
+    .slice(0, BASELINE_INCOMING_LIMIT)
+    .map(([key, snapshot]) => [
+      key,
+      Object.fromEntries(
+        Object.entries(snapshot)
+          .filter(([, dates]) => typeof dates?.startDate === "string" && typeof dates?.endDate === "string")
+          .map(([taskId, dates]) => [taskId, { startDate: dates.startDate, endDate: dates.endDate }])
+      ),
+    ] as const)
+    .filter(([, snapshot]) => Object.keys(snapshot).length > 0);
+  return Object.fromEntries(entries);
+}
+
 // Базовый план на сегодня — это состояние сроков до текущей правки, поэтому снимок
 // снимается один раз за сутки, при первом же сохранении.
-function withDailyBaseline(previous: DashboardData): Baselines {
+function withDailyBaseline(previous: DashboardData, incoming: unknown): Baselines {
+  const history: Baselines = { ...previous.baselines, ...sanitizeIncomingBaselines(incoming) };
   const key = todayKey();
-  if (previous.baselines[key]) return previous.baselines;
 
-  // Дни, в которые сроки не двигали, снимков не создают: «ближайший снимок на дату или раньше»
-  // всё равно вернёт последний, где план действительно отличался.
-  const snapshot = snapshotTaskDates(previous.tasks);
-  const previousKeys = Object.keys(previous.baselines).sort();
-  const latest = previousKeys.length > 0 ? previous.baselines[previousKeys[previousKeys.length - 1]] : null;
-  if (latest && JSON.stringify(latest) === JSON.stringify(snapshot)) return previous.baselines;
-
-  const next: Baselines = { ...previous.baselines, [key]: snapshot };
-  const keys = Object.keys(next).sort();
-  for (const stale of keys.slice(0, Math.max(0, keys.length - BASELINE_HISTORY_LIMIT))) {
-    delete next[stale];
+  if (!history[key]) {
+    // Дни, в которые сроки не двигали, снимков не создают: «ближайший снимок на дату или раньше»
+    // всё равно вернёт последний, где план действительно отличался.
+    const snapshot = snapshotTaskDates(previous.tasks);
+    const historyKeys = Object.keys(history).sort();
+    const latest = historyKeys.length > 0 ? history[historyKeys[historyKeys.length - 1]] : null;
+    if (!latest || JSON.stringify(latest) !== JSON.stringify(snapshot)) history[key] = snapshot;
   }
-  return next;
+
+  const keys = Object.keys(history).sort();
+  for (const stale of keys.slice(0, Math.max(0, keys.length - BASELINE_HISTORY_LIMIT))) {
+    delete history[stale];
+  }
+  return history;
 }
 
 function normalizePerson(value: string) {
@@ -172,10 +196,10 @@ export async function getDashboardData(): Promise<DashboardData> {
 }
 
 export async function saveDashboardData(data: DashboardData): Promise<void> {
-  // Историей базовых планов управляет только сервер: что бы ни прислал клиент,
-  // берём сохранённую историю и при необходимости дописываем снимок за сегодня.
+  // Историю базовых планов ведёт сервер: клиент может дописать снимок на выбранную дату,
+  // но не заменить накопленное. Сверх этого раз в сутки снимается автоматический снимок.
   const previous = await getDashboardData();
-  const next: DashboardData = { ...data, baselines: withDailyBaseline(previous) };
+  const next: DashboardData = { ...data, baselines: withDailyBaseline(previous, data.baselines) };
 
   const sql = await ensureTable();
   if (sql) {
