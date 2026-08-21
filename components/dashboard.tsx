@@ -8,6 +8,7 @@ import {
   ChevronRight,
   CircleAlert,
   Clock3,
+  History,
   Lightbulb,
   LoaderCircle,
   MessageSquareText,
@@ -111,6 +112,21 @@ function getMeetingRepeatDates(startValue: string, repeat: MeetingRepeat) {
     dates.push(toISO(occurrence));
   }
   return dates;
+}
+
+function addDays(value: string, days: number) {
+  const date = parseDate(value);
+  date.setDate(date.getDate() + days);
+  return toISO(date);
+}
+
+function pluralDays(count: number) {
+  const lastTwo = count % 100;
+  const last = count % 10;
+  if (lastTwo >= 11 && lastTwo <= 14) return "дней";
+  if (last === 1) return "день";
+  if (last >= 2 && last <= 4) return "дня";
+  return "дней";
 }
 
 function pluralTasks(count: number) {
@@ -867,6 +883,8 @@ export default function Dashboard({ initialData }: { initialData: DashboardData 
   const [storageMode, setStorageMode] = useState<"postgres" | "local">("local");
   const [modal, setModal] = useState<ModalState>(null);
   const [ganttFilter, setGanttFilter] = useState<"Все" | "В работе" | "Просрочено">("Все");
+  const [baselineDate, setBaselineDate] = useState("");
+  const [baselineMenuOpen, setBaselineMenuOpen] = useState(false);
   const [collapsedTaskIds, setCollapsedTaskIds] = useState<Set<string>>(() => new Set());
   const [collapsedRegularIds, setCollapsedRegularIds] = useState<Set<string>>(() => new Set(
     initialData.regularTasks
@@ -912,7 +930,9 @@ export default function Dashboard({ initialData }: { initialData: DashboardData 
       const response = await fetch("/api/data", {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ data: nextData }),
+        // Историю базовых планов ведёт сервер, обратно её не отправляем — иначе она
+        // росла бы в каждом запросе и упиралась в лимит размера тела.
+        body: JSON.stringify({ data: { ...nextData, baselines: {} } }),
       });
       const payload = (await response.json().catch(() => ({}))) as { error?: string };
       if (!response.ok) throw new Error(payload.error || "Не удалось сохранить изменения");
@@ -944,6 +964,42 @@ export default function Dashboard({ initialData }: { initialData: DashboardData 
   }), [ordered, ganttFilter]);
   const visibleTasks = useMemo(() => filteredTasks.filter((task) => !task.parentId || !collapsedTaskIds.has(task.parentId)), [filteredTasks, collapsedTaskIds]);
 
+  const baselineDates = useMemo(() => Object.keys(data.baselines || {}).sort(), [data.baselines]);
+  // Показываем ближайший снимок на выбранную дату или раньше — так дату можно назвать любую,
+  // а не выбирать из списка сохранённых.
+  const baselineKey = useMemo(() => {
+    if (!baselineDate) return null;
+    const reached = baselineDates.filter((date) => date <= baselineDate);
+    return reached.length > 0 ? reached[reached.length - 1] : null;
+  }, [baselineDate, baselineDates]);
+  const baseline = baselineKey ? data.baselines[baselineKey] : null;
+
+  // Штриховкой помечается промежуток между базовыми и текущими сроками: если срок вырос,
+  // он лежит поверх полоски, если сократился — выходит за её край. Совпали сроки — сегментов нет,
+  // и строка выглядит ровно так же, как без базового плана.
+  const baselineShiftOf = useCallback((task: Task) => {
+    const base = baseline?.[task.id];
+    if (!base || !base.startDate || !base.endDate) return null;
+    if (base.startDate === task.startDate && base.endDate === task.endDate) return null;
+
+    const segments: Array<{ id: string; from: string; to: string; inside: boolean }> = [];
+    if (base.startDate !== task.startDate) {
+      const grewEarlier = task.startDate < base.startDate;
+      const [from, to] = grewEarlier ? [task.startDate, base.startDate] : [base.startDate, task.startDate];
+      segments.push({ id: "start", from, to: addDays(to, -1), inside: grewEarlier });
+    }
+    if (base.endDate !== task.endDate) {
+      const grewLater = task.endDate > base.endDate;
+      const [from, to] = grewLater ? [base.endDate, task.endDate] : [task.endDate, base.endDate];
+      segments.push({ id: "end", from: addDays(from, 1), to, inside: grewLater });
+    }
+
+    const days = Math.round((parseDate(task.endDate).getTime() - parseDate(base.endDate).getTime()) / 86400000);
+    return { base, days, segments };
+  }, [baseline]);
+
+  const shiftedCount = useMemo(() => (baseline ? data.tasks.filter((task) => baselineShiftOf(task)).length : 0), [baseline, data.tasks, baselineShiftOf]);
+
   const openTasks = data.tasks.filter((task) => task.status !== "Завершено");
   const overdueCount = openTasks.filter(isTaskOverdue).length;
   const nearestTask = [...openTasks].filter((task) => parseDate(task.endDate) >= TODAY).sort((a, b) => parseDate(a.endDate).getTime() - parseDate(b.endDate).getTime())[0];
@@ -966,7 +1022,8 @@ export default function Dashboard({ initialData }: { initialData: DashboardData 
       : "Нет плана работ на " + MONTHS_GENITIVE[missingPlanMonths[0].monthStart.getMonth()];
 
   const ganttRange = useMemo(() => {
-    const dates = [TODAY, ...data.tasks.flatMap((task) => [parseDate(task.startDate), parseDate(task.endDate)])].filter((date) => !Number.isNaN(date.getTime()));
+    const baselineDatesInPlay = baseline ? Object.values(baseline).flatMap((base) => [parseDate(base.startDate), parseDate(base.endDate)]) : [];
+    const dates = [TODAY, ...data.tasks.flatMap((task) => [parseDate(task.startDate), parseDate(task.endDate)]), ...baselineDatesInPlay].filter((date) => !Number.isNaN(date.getTime()));
     const minDate = dates.length ? new Date(Math.min(...dates.map((date) => date.getTime()))) : TODAY;
     const maxDate = dates.length ? new Date(Math.max(...dates.map((date) => date.getTime()))) : new Date(2026, 8, 30, 12);
     const start = new Date(minDate.getFullYear(), minDate.getMonth(), 1, 12);
@@ -984,7 +1041,7 @@ export default function Dashboard({ initialData }: { initialData: DashboardData 
       cursor.setMonth(cursor.getMonth() + 1);
     }
     return { start, end, totalDays, months };
-  }, [data.tasks]);
+  }, [data.tasks, baseline]);
 
   const ideaRows = useMemo(() => {
     const search = ideaSearch.trim().toLowerCase();
@@ -1155,9 +1212,9 @@ export default function Dashboard({ initialData }: { initialData: DashboardData 
     setSelectedDate(null);
   }
 
-  function ganttBarStyle(task: Task): CSSProperties {
-    const startOffset = Math.max(0, Math.round((parseDate(task.startDate).getTime() - ganttRange.start.getTime()) / 86400000));
-    const duration = Math.max(1, Math.round((parseDate(task.endDate).getTime() - parseDate(task.startDate).getTime()) / 86400000) + 1);
+  function ganttBarStyle(startDate: string, endDate: string): CSSProperties {
+    const startOffset = Math.max(0, Math.round((parseDate(startDate).getTime() - ganttRange.start.getTime()) / 86400000));
+    const duration = Math.max(1, Math.round((parseDate(endDate).getTime() - parseDate(startDate).getTime()) / 86400000) + 1);
     return {
       left: (startOffset / ganttRange.totalDays * 100) + "%",
       width: (Math.min(duration, ganttRange.totalDays - startOffset) / ganttRange.totalDays * 100) + "%",
@@ -1268,7 +1325,46 @@ export default function Dashboard({ initialData }: { initialData: DashboardData 
       <section className="card roadmap-card">
         <div className="section-head">
           <div className="section-title-wrap"><h2>Дорожная карта</h2><nav>{(["Все", "В работе", "Просрочено"] as const).map((filter) => <button key={filter} className={ganttFilter === filter ? "active" : ""} onClick={() => setGanttFilter(filter)}>{filter}</button>)}</nav></div>
-          <div className="roadmap-actions"><button className="secondary today-button" onClick={scrollGanttToToday}><CalendarDays size={16} />Сегодня</button><button className="primary" onClick={() => setModal({ kind: "task", item: null })}><Plus size={17} />Новая задача</button></div>
+          <div className="roadmap-actions">
+            <div className="baseline-control" onBlur={(event) => {
+              if (!event.currentTarget.contains(event.relatedTarget as Node | null)) setBaselineMenuOpen(false);
+            }}>
+              <button
+                type="button"
+                className={"secondary baseline-button" + (baselineKey ? " baseline-on" : "")}
+                aria-haspopup="dialog"
+                aria-expanded={baselineMenuOpen}
+                onClick={() => setBaselineMenuOpen((current) => !current)}
+                onKeyDown={(event) => {
+                  if (event.key === "Escape") setBaselineMenuOpen(false);
+                }}
+              >
+                <History size={16} />{baselineKey ? "База: " + formatShortDate(baselineKey) : "Базовый план"}
+              </button>
+              {baselineMenuOpen ? (
+                <div className="baseline-menu" role="dialog" aria-label="Базовый план">
+                  <p>Показать, как дорожная карта выглядела на дату:</p>
+                  <input
+                    type="date"
+                    value={baselineDate}
+                    min={baselineDates[0]}
+                    max={toISO(TODAY)}
+                    onChange={(event) => setBaselineDate(event.target.value)}
+                  />
+                  <small className="baseline-hint">
+                    {!baselineDate
+                      ? "Снимки сроков сохраняются автоматически, раз в день. Доступны с " + formatShortDate(baselineDates[0]) + "."
+                      : !baselineKey
+                        ? "На эту дату снимков ещё нет. Самый ранний — " + formatShortDate(baselineDates[0]) + "."
+                        : "Снимок от " + formatShortDate(baselineKey) + " · сдвинуто " + shiftedCount + " " + pluralTasks(shiftedCount)}
+                  </small>
+                  {baselineKey ? <button type="button" className="baseline-reset" onClick={() => { setBaselineDate(""); setBaselineMenuOpen(false); }}><X size={13} />Сбросить сравнение</button> : null}
+                </div>
+              ) : null}
+            </div>
+            <button className="secondary today-button" onClick={scrollGanttToToday}><CalendarDays size={16} />Сегодня</button>
+            <button className="primary" onClick={() => setModal({ kind: "task", item: null })}><Plus size={17} />Новая задача</button>
+          </div>
         </div>
         <div className="gantt-grid">
           <div className="task-table">
@@ -1302,7 +1398,19 @@ export default function Dashboard({ initialData }: { initialData: DashboardData 
               <div className="gantt-lines">{Array.from({ length: weekLineCount }, (_, index) => <i key={index} style={{ left: (index * 7 / ganttRange.totalDays * 100) + "%" }} />)}</div>
               {todayPercent >= 0 && todayPercent <= 100 && <div className="today-line" style={{ left: todayPercent + "%" }}><span>Сегодня</span></div>}
               <div className="gantt-bars">
-                {visibleTasks.map((task) => <div className="gantt-row" key={task.id}><button aria-label={"Редактировать " + task.title} onClick={() => setModal({ kind: "task", item: task })} className={"gantt-bar gantt-" + (isTaskOverdue(task) ? "overdue" : task.status === "Завершено" ? "done" : task.status === "Не начато" ? "planned" : "active") + (task.parentId ? "" : " gantt-parent")} style={ganttBarStyle(task)}><span>{task.title}</span><i /></button></div>)}
+                {visibleTasks.map((task) => {
+                  const shift = baselineShiftOf(task);
+                  const shiftTitle = shift && baselineKey
+                    ? "Базовый план на " + formatShortDate(baselineKey) + ": " + formatShortDate(shift.base.startDate) + " — " + formatShortDate(shift.base.endDate)
+                      + (shift.days === 0 ? "" : ", дедлайн " + (shift.days > 0 ? "+" : "−") + Math.abs(shift.days) + " " + pluralDays(Math.abs(shift.days)))
+                    : undefined;
+                  return (
+                    <div className="gantt-row" key={task.id}>
+                      <button aria-label={"Редактировать " + task.title} onClick={() => setModal({ kind: "task", item: task })} className={"gantt-bar gantt-" + (isTaskOverdue(task) ? "overdue" : task.status === "Завершено" ? "done" : task.status === "Не начато" ? "planned" : "active") + (task.parentId ? "" : " gantt-parent")} style={ganttBarStyle(task.startDate, task.endDate)}><span>{task.title}</span><i /></button>
+                      {shift?.segments.map((segment) => <i key={segment.id} className={"gantt-delta" + (segment.inside ? "" : " gantt-delta-outside") + (task.parentId ? "" : " gantt-delta-parent")} style={ganttBarStyle(segment.from, segment.to)} title={shiftTitle} />)}
+                    </div>
+                  );
+                })}
               </div>
             </div>
           </div>

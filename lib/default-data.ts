@@ -2,6 +2,7 @@ import type { DashboardData } from "./types";
 
 export const DEFAULT_DATA: DashboardData = {
   clientName: "Название клиента",
+  baselines: {},
   people: [
     "Иван Петров",
     "Анна Смирнова",

@@ -4,7 +4,7 @@ import { promises as fs } from "node:fs";
 import path from "node:path";
 import { neon } from "@neondatabase/serverless";
 import { DEFAULT_DATA } from "./default-data";
-import type { DashboardData } from "./types";
+import type { Baselines, DashboardData, Task } from "./types";
 
 const localDataPath = path.join(process.cwd(), "work", "dashboard-data.json");
 
@@ -51,6 +51,48 @@ export class DatabaseNotConfiguredError extends Error {
   }
 }
 
+// Сколько дневных снимков сроков храним. Снимок — это только пары дат по задачам,
+// поэтому полгода истории занимают несколько десятков килобайт.
+const BASELINE_HISTORY_LIMIT = 180;
+
+function todayKey() {
+  const now = new Date();
+  const month = String(now.getMonth() + 1).padStart(2, "0");
+  const day = String(now.getDate()).padStart(2, "0");
+  return now.getFullYear() + "-" + month + "-" + day;
+}
+
+function snapshotTaskDates(tasks: Task[]) {
+  return Object.fromEntries(
+    tasks.map((task) => [task.id, { startDate: task.startDate, endDate: task.endDate }])
+  );
+}
+
+function normalizeBaselines(value: unknown): Baselines {
+  return value && typeof value === "object" && !Array.isArray(value) ? (value as Baselines) : {};
+}
+
+// Базовый план на сегодня — это состояние сроков до текущей правки, поэтому снимок
+// снимается один раз за сутки, при первом же сохранении.
+function withDailyBaseline(previous: DashboardData): Baselines {
+  const key = todayKey();
+  if (previous.baselines[key]) return previous.baselines;
+
+  // Дни, в которые сроки не двигали, снимков не создают: «ближайший снимок на дату или раньше»
+  // всё равно вернёт последний, где план действительно отличался.
+  const snapshot = snapshotTaskDates(previous.tasks);
+  const previousKeys = Object.keys(previous.baselines).sort();
+  const latest = previousKeys.length > 0 ? previous.baselines[previousKeys[previousKeys.length - 1]] : null;
+  if (latest && JSON.stringify(latest) === JSON.stringify(snapshot)) return previous.baselines;
+
+  const next: Baselines = { ...previous.baselines, [key]: snapshot };
+  const keys = Object.keys(next).sort();
+  for (const stale of keys.slice(0, Math.max(0, keys.length - BASELINE_HISTORY_LIMIT))) {
+    delete next[stale];
+  }
+  return next;
+}
+
 function normalizePerson(value: string) {
   return value.trim().replace(/\s+/g, " ");
 }
@@ -77,10 +119,15 @@ function derivePeople(value: Partial<DashboardData>) {
 }
 
 function normalizeDashboardData(value: Partial<DashboardData>): DashboardData {
+  const baselines = normalizeBaselines(value.baselines);
+  const tasks = Array.isArray(value.tasks) ? value.tasks : structuredClone(DEFAULT_DATA.tasks);
   return {
     ...structuredClone(DEFAULT_DATA),
     ...value,
-    tasks: Array.isArray(value.tasks) ? value.tasks : structuredClone(DEFAULT_DATA.tasks),
+    tasks,
+    // Пока история пуста, отдаём снимок «на сегодня», равный текущему плану: диаграмма
+    // тогда просто не показывает отклонений вместо пустого выпадающего списка.
+    baselines: Object.keys(baselines).length > 0 ? baselines : { [todayKey()]: snapshotTaskDates(tasks) },
     ideas: Array.isArray(value.ideas) ? value.ideas : structuredClone(DEFAULT_DATA.ideas),
     meetings: Array.isArray(value.meetings) ? value.meetings.map((meeting) => ({ ...meeting, duration: meeting.duration || "" })) : structuredClone(DEFAULT_DATA.meetings),
     regularTasks: Array.isArray(value.regularTasks) ? value.regularTasks : structuredClone(DEFAULT_DATA.regularTasks),
@@ -125,9 +172,14 @@ export async function getDashboardData(): Promise<DashboardData> {
 }
 
 export async function saveDashboardData(data: DashboardData): Promise<void> {
+  // Историей базовых планов управляет только сервер: что бы ни прислал клиент,
+  // берём сохранённую историю и при необходимости дописываем снимок за сегодня.
+  const previous = await getDashboardData();
+  const next: DashboardData = { ...data, baselines: withDailyBaseline(previous) };
+
   const sql = await ensureTable();
   if (sql) {
-    const payload = JSON.stringify(data);
+    const payload = JSON.stringify(next);
     await sql`INSERT INTO dashboard_state (id, data, updated_at)
       VALUES (1, ${payload}::jsonb, NOW())
       ON CONFLICT (id) DO UPDATE SET data = EXCLUDED.data, updated_at = NOW()`;
@@ -138,6 +190,6 @@ export async function saveDashboardData(data: DashboardData): Promise<void> {
 
   await fs.mkdir(path.dirname(localDataPath), { recursive: true });
   const temporaryPath = localDataPath + ".tmp";
-  await fs.writeFile(temporaryPath, JSON.stringify(data, null, 2), "utf8");
+  await fs.writeFile(temporaryPath, JSON.stringify(next, null, 2), "utf8");
   await fs.rename(temporaryPath, localDataPath);
 }
