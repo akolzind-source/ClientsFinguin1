@@ -427,6 +427,50 @@ button:focus-visible, input:focus-visible, select:focus-visible, textarea:focus-
 .today-button { color: var(--navy); border-color: #b9cae3; background: #f8fbff; }
 .today-button:hover { background: #edf4fd; }
 
+.baseline-control { position: relative; }
+.baseline-button { color: var(--navy); border-color: #b9cae3; background: #f8fbff; }
+.baseline-button:hover { background: #edf4fd; }
+.baseline-button.baseline-on { color: #8a5710; border-color: #e3bc7c; background: #fff6e8; }
+.baseline-menu {
+  position: absolute;
+  z-index: 20;
+  top: calc(100% + 8px);
+  left: 0;
+  width: 276px;
+  padding: 14px;
+  display: grid;
+  gap: 10px;
+  border: 1px solid var(--soft-line);
+  border-radius: 12px;
+  background: #fff;
+  box-shadow: 0 18px 38px rgba(15, 32, 60, .16);
+}
+.baseline-menu p { margin: 0; color: #405066; font-size: 12px; line-height: 1.45; }
+.baseline-menu input {
+  width: 100%;
+  height: 36px;
+  padding: 0 10px;
+  border: 1px solid #d6dee8;
+  border-radius: 8px;
+  background: #fff;
+  color: var(--navy);
+  font: inherit;
+  font-size: 13px;
+}
+.baseline-hint { color: #7c8798; font-size: 11px; line-height: 1.45; }
+.baseline-reset {
+  justify-self: start;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  border: 0;
+  padding: 0;
+  background: none;
+  color: #cf393f;
+  font-size: 12px;
+  cursor: pointer;
+}
+
 .primary, .secondary, .delete-button, .complete-button {
   min-height: 37px;
   border-radius: 6px;
@@ -615,6 +659,23 @@ button:focus-visible, input:focus-visible, select:focus-visible, textarea:focus-
   background: #fff;
   transform: translateY(-50%) rotate(45deg);
 }
+/* Промежуток между базовыми и текущими сроками. Внутри полоски штриховка ложится поверх её
+   цвета, за пределами — на собственную подложку, чтобы читаться на пустой шкале. */
+.gantt-delta {
+  position: absolute;
+  top: 16px;
+  min-width: 3px;
+  height: 13px;
+  border-radius: 7px;
+  background-image: repeating-linear-gradient(135deg, rgba(255, 255, 255, .92) 0 3px, rgba(255, 255, 255, 0) 3px 7px);
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, .6);
+}
+.gantt-delta-outside {
+  background-color: #f0c98d;
+  background-image: repeating-linear-gradient(135deg, rgba(255, 255, 255, .95) 0 3px, rgba(255, 255, 255, 0) 3px 7px);
+  box-shadow: inset 0 0 0 1px rgba(158, 102, 14, .42);
+}
+.gantt-delta-parent { height: 14px; }
 .gantt-parent { height: 14px; background: var(--navy-2); }
 .gantt-done { color: var(--teal); background: var(--teal); }
 .gantt-active { color: var(--blue); background: var(--blue); }
@@ -1175,8 +1236,11 @@ button:focus-visible, input:focus-visible, select:focus-visible, textarea:focus-
   .planning-months > span { width: 100%; }
   .section-head, .compact-head { align-items: stretch; flex-direction: column; }
   .section-head .primary, .compact-head .primary { width: 100%; }
-  .roadmap-actions { width: 100%; }
-  .roadmap-actions .secondary, .roadmap-actions .primary { width: 50%; }
+  .roadmap-actions { width: 100%; flex-wrap: wrap; }
+  .roadmap-actions > .secondary, .roadmap-actions > .primary { width: calc(50% - 5px); }
+  .baseline-control { width: 100%; }
+  .baseline-control .secondary { width: 100%; }
+  .baseline-menu { width: 100%; }
   .calendar-layout { display: block; }
   .form-grid, .meeting-status-line { grid-template-columns: 1fr; gap: 0; }
   .modal-backdrop { padding: 0; place-items: end center; }

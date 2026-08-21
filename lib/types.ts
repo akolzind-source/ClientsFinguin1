@@ -69,6 +69,15 @@ export interface Task {
   comments: string[];
 }
 
+export interface BaselineTask {
+  startDate: string;
+  endDate: string;
+}
+
+// Срез сроков дорожной карты: дата снимка (ISO) → id задачи → её сроки на тот момент.
+// Храним только даты, чтобы история оставалась лёгкой.
+export type Baselines = Record<string, Record<string, BaselineTask>>;
+
 export interface Idea {
   id: string;
   title: string;
@@ -104,4 +113,5 @@ export interface DashboardData {
   meetings: Meeting[];
   regularTasks: RegularTask[];
   reports: AccountingReport[];
+  baselines: Baselines;
 }
