@@ -33,7 +33,8 @@ describe("provision", () => {
   it("создаёт проект Vercel и базу Neon, ставит три переменные", async () => {
     const fetch = fakeFetch({
       "GET api.vercel.com/v9/projects/roadmap-romashka": [404, {}],
-      "POST api.vercel.com/v11/projects": [200, { id: "prj_1", name: "roadmap-romashka" }],
+      "POST api.vercel.com/v11/projects": [200, { id: "prj_1", name: "roadmap-romashka", nodeVersion: "26.x" }],
+      "PATCH api.vercel.com/v9/projects/prj_1": [200, { id: "prj_1", nodeVersion: "24.x" }],
       "GET api.vercel.com/v9/projects/prj_1/env": [200, { envs: [] }],
       "GET console.neon.tech/api/v2/projects": [200, { projects: [] }],
       "POST console.neon.tech/api/v2/projects": [201, { project: { id: "neon_1", name: "roadmap-romashka" } }],
@@ -45,6 +46,8 @@ describe("provision", () => {
     expect(result.projectId).toBe("prj_1");
     const created = fetch.calls.find((c) => c.key === "POST api.vercel.com/v11/projects");
     expect(created.body).toEqual({ name: "roadmap-romashka", framework: "nextjs", serverlessFunctionRegion: "fra1" });
+    const node = fetch.calls.find((c) => c.key === "PATCH api.vercel.com/v9/projects/prj_1");
+    expect(node.body).toEqual({ nodeVersion: "24.x" });
     const neon = fetch.calls.find((c) => c.key === "POST console.neon.tech/api/v2/projects");
     expect(neon.body).toEqual({ project: { name: "roadmap-romashka", region_id: "aws-eu-central-1", org_id: "org-1" } });
     const env = fetch.calls.find((c) => c.key === "POST api.vercel.com/v10/projects/prj_1/env");
@@ -56,7 +59,7 @@ describe("provision", () => {
 
   it("ничего не трогает, если проект и переменные уже есть", async () => {
     const fetch = fakeFetch({
-      "GET api.vercel.com/v9/projects/roadmap-romashka": [200, { id: "prj_1" }],
+      "GET api.vercel.com/v9/projects/roadmap-romashka": [200, { id: "prj_1", nodeVersion: "24.x" }],
       "GET api.vercel.com/v9/projects/prj_1/env": [200, { envs: [{ key: "DATABASE_URL" }, { key: "CONTROL_PASSWORD" }, { key: "CLIENT_NAME" }] }],
     });
     const result = await provision({ ...base, neonKey: undefined, fetch });
@@ -65,6 +68,28 @@ describe("provision", () => {
       "GET api.vercel.com/v9/projects/roadmap-romashka",
       "GET api.vercel.com/v9/projects/prj_1/env",
     ]);
+  });
+
+  it("ставит Node 24.x у существующего проекта: сборка в Actions идёт на 24", async () => {
+    const fetch = fakeFetch({
+      "GET api.vercel.com/v9/projects/roadmap-romashka": [200, { id: "prj_1", nodeVersion: "26.x" }],
+      "PATCH api.vercel.com/v9/projects/prj_1": [200, { id: "prj_1", nodeVersion: "24.x" }],
+      "GET api.vercel.com/v9/projects/prj_1/env": [200, { envs: [{ key: "DATABASE_URL" }, { key: "CONTROL_PASSWORD" }, { key: "CLIENT_NAME" }] }],
+    });
+    const result = await provision({ ...base, neonKey: undefined, fetch });
+    expect(result.code).toBe(0);
+    const patch = fetch.calls.find((c) => c.key === "PATCH api.vercel.com/v9/projects/prj_1");
+    expect(patch.body).toEqual({ nodeVersion: "24.x" });
+  });
+
+  it("стоп: Vercel не дал поменять версию Node", async () => {
+    const fetch = fakeFetch({
+      "GET api.vercel.com/v9/projects/roadmap-romashka": [200, { id: "prj_1", nodeVersion: "26.x" }],
+      "PATCH api.vercel.com/v9/projects/prj_1": [400, { error: { message: "bad" } }],
+    });
+    const result = await provision({ ...base, fetch });
+    expect(result.code).toBe(1);
+    expect(result.message).toContain("24.x");
   });
 
   it("стоп: проект связан с Git", async () => {
@@ -81,7 +106,7 @@ describe("provision", () => {
 
   it("стоп: нет базы и нет ключа Neon", async () => {
     const fetch = fakeFetch({
-      "GET api.vercel.com/v9/projects/roadmap-romashka": [200, { id: "prj_1" }],
+      "GET api.vercel.com/v9/projects/roadmap-romashka": [200, { id: "prj_1", nodeVersion: "24.x" }],
       "GET api.vercel.com/v9/projects/prj_1/env": [200, { envs: [] }],
     });
     const result = await provision({ ...base, neonKey: "", fetch });

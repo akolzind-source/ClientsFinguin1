@@ -21,6 +21,7 @@ const VERCEL = "https://api.vercel.com";
 const NEON = "https://console.neon.tech/api/v2";
 const NAME = /^roadmap-[a-z0-9][a-z0-9-]{1,38}$/;
 const REGION = "aws-eu-central-1";
+const NODE = "24.x";
 const defaultSleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
 async function call(fetch, base, token, method, path, body) {
@@ -69,6 +70,12 @@ export async function provision({ repo, team, neonOrg, vercelToken, neonKey, cli
   if (project.status >= 300 || !project.data.id) return stop(`Vercel: проект ${repo} — ответ ${project.status}.`);
   if (project.data.link) return stop(`проект ${repo} уже есть в команде Vercel и связан с GitHub. Владельцу: отключить Git в настройках проекта или взять другое имя.`);
   const id = project.data.id;
+  // Сборка идёт в Actions на Node 24 (deploy.yml); новый проект Vercel
+  // получает версию новее, и vercel build её не принимает.
+  if (project.data.nodeVersion !== NODE) {
+    const node = await call(fetch, VERCEL, vercelToken, "PATCH", `/v9/projects/${id}?${q}`, { nodeVersion: NODE });
+    if (node.status >= 300) return stop(`Vercel не дал поставить проекту ${repo} Node ${NODE} (ответ ${node.status}).`);
+  }
 
   const env = await call(fetch, VERCEL, vercelToken, "GET", `/v9/projects/${id}/env?${q}`);
   if (env.status >= 300) return stop(`Vercel: переменные проекта — ответ ${env.status}.`);
