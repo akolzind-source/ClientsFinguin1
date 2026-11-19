@@ -48,3 +48,11 @@ export function regularMonthStatus(task: RegularTask, monthStart: string, today:
   if (statuses.some((status) => status === "Выполнено" || status === "С опозданием")) return "Частично";
   return "Запланировано";
 }
+
+export function regularStatusClass(status: RegularStatus) {
+  if (status === "Выполнено") return "regular-status regular-status-done";
+  if (status === "Просрочено") return "regular-status regular-status-overdue";
+  if (status === "С опозданием") return "regular-status regular-status-late";
+  if (status === "Частично") return "regular-status regular-status-partial";
+  return "regular-status regular-status-planned";
+}

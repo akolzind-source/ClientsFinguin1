@@ -37,7 +37,7 @@ import { useDragSort } from "@/components/use-drag-sort";
 import WeekReportView from "@/components/week-report";
 import { activeTasks, archiveCount, archiveTask, isArchived, removeTask, restoreTask } from "@/lib/archive";
 import { addDays, differenceInDays, formatDayMonth, formatDayShortMonth, parseDate, startOfWeek, toISO } from "@/lib/dates";
-import { formatWeekRange, weekAgeLabel, weekBounds } from "@/lib/week-report";
+import { formatWeekRange, toggleRegularOccurrence, weekAgeLabel, weekBounds } from "@/lib/week-report";
 import { closingMonthKey, isWorkTask, monthClosing, parentSummary, sprintHealth } from "@/lib/roadmap-pulse";
 import MonthClosingPopover from "@/components/month-closing-popover";
 import { plural } from "@/lib/plural";
@@ -69,8 +69,7 @@ import type {
 } from "@/lib/types";
 import { calendarBucket, collectCalendarTasks } from "@/lib/calendar-items";
 import type { CalendarTask, CalendarTaskSource } from "@/lib/calendar-items";
-import { getPlannedDates, occurrenceStatus, regularMonthStatus } from "@/lib/regular-schedule";
-import type { RegularStatus } from "@/lib/regular-schedule";
+import { getPlannedDates, occurrenceStatus, regularMonthStatus, regularStatusClass } from "@/lib/regular-schedule";
 import { checkpointDate, checkpointMarks, checkpointState } from "@/lib/checkpoint-dates";
 import { isWaitingClient, setCheckpointDone, withCompletion } from "@/lib/checkpoint-tracking";
 import type { CheckpointMark } from "@/lib/checkpoint-dates";
@@ -288,14 +287,6 @@ function orderedRegularTasks(tasks: RegularTask[]) {
   });
   result.push(...tasks.filter((task) => task.parentId && !tasks.some((parent) => parent.id === task.parentId)));
   return result;
-}
-
-function regularStatusClass(status: RegularStatus) {
-  if (status === "Выполнено") return "regular-status regular-status-done";
-  if (status === "Просрочено") return "regular-status regular-status-overdue";
-  if (status === "С опозданием") return "regular-status regular-status-late";
-  if (status === "Частично") return "regular-status regular-status-partial";
-  return "regular-status regular-status-planned";
 }
 
 function splitPeople(value: string) {
@@ -1525,6 +1516,14 @@ export default function Dashboard({ initialData, initialStorage, serverToday, te
     setModal(null);
   }
 
+  const saveWeekNote = useCallback((week: string, text: string) => {
+    commit((current) => {
+      const weekNotes = { ...(current.weekNotes ?? {}) };
+      if (text.trim()) weekNotes[week] = text; else delete weekNotes[week];
+      return { ...current, weekNotes };
+    });
+  }, [commit]);
+
   function saveRegularTask(task: RegularTask) {
     commit((current) => ({
       ...current,
@@ -1892,7 +1891,17 @@ export default function Dashboard({ initialData, initialStorage, serverToday, te
         {ganttFilter === "Архив"
           ? <ArchiveView tasks={data.tasks} onOpenTask={(task) => setModal({ kind: "task", item: task })} onRestore={restoreTaskById} onDelete={deleteTask} />
           : ganttFilter === "Неделя"
-          ? <WeekReportView tasks={data.tasks} today={todayKey} weekStart={weekStart} onOpenTask={(task) => setModal({ kind: "task", item: task })} />
+          ? <WeekReportView
+              tasks={data.tasks}
+              regularTasks={data.regularTasks}
+              today={todayKey}
+              weekStart={weekStart}
+              note={data.weekNotes?.[weekStart] ?? ""}
+              onNoteChange={saveWeekNote}
+              onOpenTask={(task) => setModal({ kind: "task", item: task })}
+              onOpenRegular={(task, date) => setModal({ kind: "regular-period", task, monthStart: toISO(startOfMonth(parseDate(date))) })}
+              onToggleRegular={(task, date) => commit((current) => ({ ...current, regularTasks: current.regularTasks.map((item) => item.id === task.id ? toggleRegularOccurrence(item, date, todayKey) : item) }))}
+            />
           : <div className="gantt-grid">
           <div className="task-table" ref={taskTableRef}>
             <div className="task-table-head"><span>Задача</span><span>Ответственный</span><span>Статус</span><span>Срок</span></div>

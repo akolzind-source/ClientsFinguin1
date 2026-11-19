@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { formatWeekRange, weekAgeLabel, weekBounds, weekReport } from "./week-report";
-import type { Checkpoint, Task } from "./types";
+import { checklistWeek, formatWeekRange, regularWeek, toggleRegularOccurrence, weekAgeLabel, weekBounds, weekReport } from "./week-report";
+import type { Checkpoint, RegularTask, Task } from "./types";
 
 const TODAY = "2026-10-10";
 const cp = (code: string, extra: Partial<Checkpoint> = {}): Checkpoint => ({ code, title: code, aside: "", gate: false, noteTitle: "", note: "", done: false, ...extra });
@@ -94,5 +94,72 @@ describe("подписи и границы", () => {
     expect(weekAgeLabel("2026-09-28", TODAY)).toBe("1 неделю назад");
     expect(weekAgeLabel("2026-09-21", TODAY)).toBe("2 недели назад");
     expect(weekAgeLabel("2026-08-31", TODAY)).toBe("5 недель назад");
+  });
+});
+
+describe("checklistWeek — пункты чек-листов", () => {
+  it("сделанное за неделю — с пометкой, куда уехал спринт", () => {
+    const week = checklistWeek(tasks, "2026-10-05", TODAY);
+    expect(week.done.map((group) => [group.task.id, group.items.map((item) => item.code), group.closed, group.movedTo])).toEqual([["s1", ["S1.1"], false, "2026-10-11"]]);
+    expect(week.doneCount).toBe(1);
+  });
+  it("открытые пункты перенесённого на неделе спринта попадают в «не сделано»", () => {
+    const week = checklistWeek(tasks, "2026-10-05", TODAY);
+    expect(week.missed.map((group) => [group.task.id, group.items.map((item) => item.code), group.movedTo])).toEqual([["s1", ["S1.2"], "2026-10-11"]]);
+    expect(week.missedCount).toBe(1);
+  });
+  it("план — открытые пункты со сроком на следующей неделе, без даты — по сроку спринта", () => {
+    const week = checklistWeek(tasks, "2026-10-05", TODAY);
+    expect(week.next.map((group) => [group.task.id, group.items.map((item) => item.code)])).toEqual([["s3", ["S3.2", "S3.1", "S3.3"]]]);
+    expect(week.nextCount).toBe(3);
+  });
+  it("прошлая неделя: спринт переехал, часть пунктов сделана — он и в сделанном, и в несделанном", () => {
+    const week = checklistWeek(tasks, "2026-09-28", TODAY);
+    expect(week.done.map((group) => [group.task.id, group.items.map((item) => item.code), group.movedTo])).toEqual([["s2", ["S2.1"], "2026-10-04"]]);
+    expect(week.missed.map((group) => [group.task.id, group.items.map((item) => item.code)])).toEqual([["s2", ["S2.2"]]]);
+  });
+  it("пункт, отмеченный позже недели, на ту неделю считается несделанным", () => {
+    const late: Task = { ...s3, id: "s4", startDate: "2026-09-28", endDate: "2026-10-02", groups: [{ title: "", result: "", items: [cp("S4.1", { date: "2026-10-01", done: true, doneAt: "2026-10-07" })] }] };
+    const week = checklistWeek([...tasks, late], "2026-09-28", TODAY);
+    expect(week.missed.map((group) => group.task.id)).toContain("s4");
+  });
+  it("закрытый спринт — с пометкой, его открытые пункты не висят", () => {
+    const week = checklistWeek(tasks, "2026-09-07", TODAY);
+    expect(week.done.map((group) => [group.task.id, group.closed])).toEqual([["s0", true]]);
+    expect(week.missed).toEqual([]);
+  });
+  it("архив: сделанное остаётся, несделанное и план — нет", () => {
+    const week = checklistWeek([{ ...parent, archivedAt: TODAY }, s0, s1, s2, s3], "2026-10-05", TODAY);
+    expect(week.done.map((group) => group.task.id)).toEqual(["s1"]);
+    expect(week.missed).toEqual([]);
+    expect(week.next).toEqual([]);
+  });
+});
+
+describe("regularWeek — регулярные задачи", () => {
+  const reg = (id: string, extra: Partial<RegularTask>): RegularTask => ({ id, parentId: null, title: id, assignee: "", frequency: "monthly", anchorDate: "2026-07-01", description: "", records: {}, ...extra });
+  const r1 = reg("r1", { frequency: "weekly", anchorDate: "2026-09-07", records: { "2026-10-05": { actualDate: "2026-10-06", note: "" } } });
+  const r2 = reg("r2", { parentId: "r1", anchorDate: "2026-08-09" });
+  const r3 = reg("r3", { anchorDate: "2026-07-11" });
+  const r4 = reg("r4", { frequency: "quarterly", anchorDate: "2026-07-14" });
+  const week = regularWeek([r1, r2, r3, r4], "2026-10-05", TODAY);
+
+  it("повторы недели по дате со статусами и надзадачей", () => {
+    expect(week.week.map((item) => [item.task.id, item.date, item.status, item.parent?.id])).toEqual([
+      ["r1", "2026-10-05", "С опозданием", undefined],
+      ["r2", "2026-10-09", "Просрочено", "r1"],
+      ["r3", "2026-10-11", "Запланировано", undefined],
+    ]);
+  });
+  it("счётчики: выполнено из всего и не сделано в срок", () => {
+    expect([week.doneCount, week.week.length, week.missedCount]).toEqual([1, 3, 2]);
+  });
+  it("план следующей недели", () => {
+    expect(week.next.map((item) => [item.task.id, item.date])).toEqual([["r1", "2026-10-12"], ["r4", "2026-10-14"]]);
+  });
+  it("галочка ставит сегодняшнюю дату и снимает её, примечание остаётся", () => {
+    const marked = toggleRegularOccurrence({ ...r3, records: { "2026-10-11": { actualDate: "", note: "звонили" } } }, "2026-10-11", TODAY);
+    expect(marked.records["2026-10-11"]).toEqual({ actualDate: TODAY, note: "звонили" });
+    expect(toggleRegularOccurrence(marked, "2026-10-11", TODAY).records["2026-10-11"]).toEqual({ actualDate: "", note: "звонили" });
   });
 });
