@@ -8,9 +8,9 @@ import { regularStatusClass } from "@/lib/regular-schedule";
 import { shiftReasonInfo } from "@/lib/task-shifts";
 import { taskCheckpoints } from "@/lib/typical-tasks";
 import type { Checkpoint, RegularTask, Task } from "@/lib/types";
-import { checklistWeek, formatWeekRange, regularWeek, weekReport, type ChecklistGroup, type RegularOccurrence } from "@/lib/week-report";
+import { formatWeekRange, regularWeek, weekReport, type RegularOccurrence } from "@/lib/week-report";
 
-type WeekBlock = "sprints" | "checklists" | "regular";
+type WeekBlock = "sprints" | "regular";
 
 interface WeekReportProps {
   tasks: Task[];
@@ -32,18 +32,14 @@ function TaskTitle({ task, tasks }: { task: Task; tasks: Task[] }) {
 }
 
 export default function WeekReportView(props: WeekReportProps) {
-  const { tasks, regularTasks, today, weekStart } = props;
+  const { regularTasks, today, weekStart } = props;
   const [block, setBlock] = useState<WeekBlock>("sprints");
-  const checklists = checklistWeek(tasks, weekStart, today);
   const regular = regularWeek(regularTasks, weekStart, today);
 
   return (
     <div className="wk">
       <div className="wk-tabs" role="tablist" aria-label="Блоки недели">
         <button type="button" role="tab" aria-selected={block === "sprints"} className={block === "sprints" ? "active" : ""} onClick={() => setBlock("sprints")}>Спринты</button>
-        <button type="button" role="tab" aria-selected={block === "checklists"} className={block === "checklists" ? "active" : ""} onClick={() => setBlock("checklists")}>
-          <Check size={14} />Чек-листы<span className="wk-tab-count">{checklists.doneCount}</span>
-        </button>
         <button type="button" role="tab" aria-selected={block === "regular"} className={block === "regular" ? "active" : ""} onClick={() => setBlock("regular")}>
           <Repeat2 size={14} />Регулярные задачи<span className="wk-tab-count">{regular.doneCount}/{regular.week.length}</span>
         </button>
@@ -52,7 +48,6 @@ export default function WeekReportView(props: WeekReportProps) {
       <WeekNote key={weekStart} weekStart={weekStart} initial={props.note} onSave={props.onNoteChange} />
 
       {block === "sprints" && <SprintsBlock {...props} />}
-      {block === "checklists" && <ChecklistsBlock tasks={tasks} today={today} week={checklists} onOpenTask={props.onOpenTask} />}
       {block === "regular" && <RegularBlock weekStart={weekStart} week={regular} onOpen={props.onOpenRegular} onToggle={props.onToggleRegular} />}
     </div>
   );
@@ -166,47 +161,10 @@ function DoneItem({ item }: { item: Checkpoint }) {
   return <div className="wk-item"><span className="wk-tick is-done"><Check size={10} strokeWidth={3.4} /></span><code>{item.code}</code><span>{item.title}</span><time>{formatDayShortMonth(item.doneAt!)}</time></div>;
 }
 
-function OpenItem({ item, today, fallback }: { item: Checkpoint; today: string; fallback?: string }) {
-  const date = item.date || fallback;
+function OpenItem({ item, today }: { item: Checkpoint; today: string }) {
+  const date = item.date;
   const late = Boolean(date) && date! < today;
   return <div className="wk-item"><span className={"wk-tick" + (late ? " is-late" : "")} /><code>{item.code}</code><span>{item.title}</span><time className={late ? "is-late" : ""}>{date ? (late ? "был " : "") + formatDayShortMonth(date) : "без даты"}</time></div>;
-}
-
-function ChecklistsBlock({ tasks, today, week, onOpenTask }: { tasks: Task[]; today: string; week: ReturnType<typeof checklistWeek>; onOpenTask: (task: Task) => void }) {
-  const groupTitle = (group: ChecklistGroup) => (
-    <button type="button" className="wk-group-title" onClick={() => onOpenTask(group.task)}>
-      <TaskTitle task={group.task} tasks={tasks} />
-      {group.closed && <span className="flag flag-teal">спринт закрыт</span>}
-      {group.movedTo && <span className="flag flag-amber">спринт перенесён на {formatDayShortMonth(group.movedTo)}</span>}
-    </button>
-  );
-  const items = (count: number) => count + " " + plural(count, "пункт", "пункта", "пунктов");
-  return (
-    <>
-      <div className="wk-summary">
-        <span>Сделано: <b>{week.doneCount}</b></span>
-        <span>Не сделано в срок: <b>{week.missedCount}</b></span>
-        <span>В плане на следующую неделю: <b>{week.nextCount}</b></span>
-      </div>
-      <div className="wk-cols">
-        <section className="wk-col">
-          <div className="wk-col-head"><h3>Сделано за неделю</h3><small>{items(week.doneCount)}</small></div>
-          {week.done.length === 0 && <div className="wk-empty">Ни один пункт не отмечен</div>}
-          {week.done.map((group) => <div className="wk-group" key={group.task.id}>{groupTitle(group)}{group.items.map((item) => <DoneItem key={item.code} item={item} />)}</div>)}
-        </section>
-        <section className="wk-col">
-          <div className="wk-col-head"><h3>Не сделано / переехало</h3><small>{items(week.missedCount)}</small></div>
-          {week.missed.length === 0 && <div className="wk-empty">Все пункты недели закрыты</div>}
-          {week.missed.map((group) => <div className="wk-group" key={group.task.id}>{groupTitle(group)}{group.items.map((item) => <OpenItem key={item.code} item={item} today={today} fallback={group.end} />)}</div>)}
-        </section>
-        <section className="wk-col">
-          <div className="wk-col-head"><h3>План на следующую неделю</h3><small>{items(week.nextCount)}</small></div>
-          {week.next.length === 0 && <div className="wk-empty">На следующую неделю пунктов нет</div>}
-          {week.next.map((group) => <div className="wk-group" key={group.task.id}>{groupTitle(group)}{group.items.map((item) => <OpenItem key={item.code} item={item} today={today} fallback={group.task.endDate} />)}</div>)}
-        </section>
-      </div>
-    </>
-  );
 }
 
 function RegularBlock({ weekStart, week, onOpen, onToggle }: { weekStart: string; week: ReturnType<typeof regularWeek>; onOpen: (task: RegularTask, date: string) => void; onToggle: (task: RegularTask, date: string) => void }) {

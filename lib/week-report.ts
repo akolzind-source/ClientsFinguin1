@@ -56,14 +56,25 @@ export function weekReport(tasks: Task[], weekStart: string, today: string): Wee
       return { task, endDate, daysLate: differenceInDays(endDate, asOf), openItems: taskCheckpoints(task).filter((item) => !item.done) };
     });
 
+  // План привязан к датам следующей недели. Спринт, который на ней идёт, — с открытыми пунктами
+  // без даты и с датой не позже конца недели (просроченные тоже). Из остальных спринтов — только
+  // пункты с плановой датой на следующей неделе. Пункты на более поздние недели ждут своей недели.
   const next = live
-    .filter((task) => !isTaskCompleted(task) && task.startDate <= nextEnd && task.endDate >= nextStart)
-    .sort((a, b) => a.startDate.localeCompare(b.startDate))
+    .filter((task) => !isTaskCompleted(task))
     .map((task) => {
+      const running = task.startDate <= nextEnd && task.endDate >= nextStart;
       const open = taskCheckpoints(task).filter((item) => !item.done);
-      const dated = open.filter((item) => item.date && item.date >= nextStart && item.date <= nextEnd).sort((a, b) => a.date!.localeCompare(b.date!));
-      return { task, items: [...dated, ...open.filter((item) => !dated.includes(item))] };
-    });
+      const dated = open
+        .filter((item) => checkpointDate(item) && checkpointDate(item) <= nextEnd && (running || checkpointDate(item) >= nextStart))
+        .sort((a, b) => checkpointDate(a).localeCompare(checkpointDate(b)));
+      const undated = running ? open.filter((item) => !checkpointDate(item)) : [];
+      const sortKey = [running ? (task.startDate > nextStart ? task.startDate : nextStart) : "", dated[0] ? checkpointDate(dated[0]) : ""]
+        .filter(Boolean).sort()[0] ?? task.startDate;
+      return { task, items: [...dated, ...undated], running, sortKey };
+    })
+    .filter((entry) => entry.running || entry.items.length > 0)
+    .sort((a, b) => a.sortKey.localeCompare(b.sortKey))
+    .map(({ task, items }) => ({ task, items }));
 
   const doneCount = done.reduce((count, group) => count + group.items.length, 0);
   const closedCount = done.filter((group) => group.closed).length;
@@ -73,76 +84,6 @@ export function weekReport(tasks: Task[], weekStart: string, today: string): Wee
     done, doneCount, closedCount, shifts, stuck, next,
     noMovement: doneCount === 0 && closedCount === 0 && shifts.length === 0,
   };
-}
-
-export interface ChecklistGroup {
-  task: Task;
-  items: Checkpoint[];
-  // Новый срок, если спринт перенесли на этой неделе.
-  movedTo?: string;
-  closed?: boolean;
-  // Срок спринта на конец недели — его показываем у пунктов без своей даты.
-  end?: string;
-}
-
-export interface ChecklistWeek {
-  done: ChecklistGroup[];
-  missed: ChecklistGroup[];
-  next: ChecklistGroup[];
-  doneCount: number;
-  missedCount: number;
-  nextCount: number;
-}
-
-const countItems = (groups: ChecklistGroup[]) => groups.reduce((count, group) => count + group.items.length, 0);
-
-// Пункты чек-листов за неделю. Сделанное — по дню отметки. Не сделано — пункты, открытые на конец
-// недели (или на сегодня), у которых срок пришёлся на неделю и прошёл, и все открытые пункты спринта,
-// перенесённого на этой неделе. Срок пункта без своей даты — срок спринта на тот день.
-export function checklistWeek(tasks: Task[], weekStart: string, today: string): ChecklistWeek {
-  const weekEnd = addDays(weekStart, 6);
-  const asOf = weekEnd < today ? weekEnd : today;
-  const nextStart = addDays(weekStart, 7);
-  const nextEnd = addDays(weekStart, 13);
-  const inWeek = (date?: string) => Boolean(date) && date! >= weekStart && date! <= weekEnd;
-  const work = tasks.filter((task) => isWorkTask(task, tasks));
-  const live = work.filter((task) => !isArchived(task, tasks));
-  const movedTo = (task: Task) => (task.shifts ?? []).filter((shift) => inWeek(shift.date) && shift.date <= asOf).at(-1)?.to;
-  const byDue = (due: (item: Checkpoint) => string) => (a: Checkpoint, b: Checkpoint) => due(a).localeCompare(due(b));
-
-  const done = work
-    .map((task) => ({
-      task,
-      items: taskCheckpoints(task).filter((item) => item.done && inWeek(item.doneAt) && item.doneAt! <= asOf).sort((a, b) => a.doneAt!.localeCompare(b.doneAt!)),
-      closed: task.status === "Завершено" && inWeek(task.completedAt),
-      movedTo: movedTo(task),
-    }))
-    .filter((group) => group.items.length > 0 || group.closed);
-
-  const missed = live
-    .filter((task) => !isTaskCompleted(task, asOf))
-    .map((task) => {
-      const end = endDateAt(task, asOf);
-      const due = (item: Checkpoint) => checkpointDate(item) || end;
-      const moved = movedTo(task);
-      // Открыт на тот день: не отмечен или отмечен позже. Отметка без дня считается давней.
-      const open = taskCheckpoints(task).filter((item) => !item.done || (Boolean(item.doneAt) && item.doneAt! > asOf));
-      const items = open.filter((item) => Boolean(moved) || (inWeek(due(item)) && due(item) < today)).sort(byDue(due));
-      return { task, items, movedTo: moved, end };
-    })
-    .filter((group) => group.items.length > 0);
-
-  const next = live
-    .filter((task) => !isTaskCompleted(task))
-    .map((task) => {
-      const due = (item: Checkpoint) => checkpointDate(item) || task.endDate;
-      const items = taskCheckpoints(task).filter((item) => !item.done && due(item) >= nextStart && due(item) <= nextEnd).sort(byDue(due));
-      return { task, items };
-    })
-    .filter((group) => group.items.length > 0)
-    .sort((a, b) => (checkpointDate(a.items[0]) || a.task.endDate).localeCompare(checkpointDate(b.items[0]) || b.task.endDate));
-
-  return { done, missed, next, doneCount: countItems(done), missedCount: countItems(missed), nextCount: countItems(next) };
 }
 
 export interface RegularOccurrence {
