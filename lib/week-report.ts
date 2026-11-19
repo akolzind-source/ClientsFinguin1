@@ -3,8 +3,10 @@ import { addDays, differenceInDays, parseDate, startOfWeek } from "./dates";
 import { plural } from "./plural";
 import { isTaskCompleted, isWorkTask } from "./roadmap-pulse";
 import { endDateAt } from "./task-shifts";
+import { checkpointDate } from "./checkpoint-dates";
+import { getPlannedDates, occurrenceStatus, type RegularStatus } from "./regular-schedule";
 import { taskCheckpoints } from "./typical-tasks";
-import type { Checkpoint, Task, TaskShift } from "./types";
+import type { Checkpoint, RegularRecord, RegularTask, Task, TaskShift } from "./types";
 
 export interface WeekReport {
   weekStart: string;
@@ -71,6 +73,128 @@ export function weekReport(tasks: Task[], weekStart: string, today: string): Wee
     done, doneCount, closedCount, shifts, stuck, next,
     noMovement: doneCount === 0 && closedCount === 0 && shifts.length === 0,
   };
+}
+
+export interface ChecklistGroup {
+  task: Task;
+  items: Checkpoint[];
+  // Новый срок, если спринт перенесли на этой неделе.
+  movedTo?: string;
+  closed?: boolean;
+  // Срок спринта на конец недели — его показываем у пунктов без своей даты.
+  end?: string;
+}
+
+export interface ChecklistWeek {
+  done: ChecklistGroup[];
+  missed: ChecklistGroup[];
+  next: ChecklistGroup[];
+  doneCount: number;
+  missedCount: number;
+  nextCount: number;
+}
+
+const countItems = (groups: ChecklistGroup[]) => groups.reduce((count, group) => count + group.items.length, 0);
+
+// Пункты чек-листов за неделю. Сделанное — по дню отметки. Не сделано — пункты, открытые на конец
+// недели (или на сегодня), у которых срок пришёлся на неделю и прошёл, и все открытые пункты спринта,
+// перенесённого на этой неделе. Срок пункта без своей даты — срок спринта на тот день.
+export function checklistWeek(tasks: Task[], weekStart: string, today: string): ChecklistWeek {
+  const weekEnd = addDays(weekStart, 6);
+  const asOf = weekEnd < today ? weekEnd : today;
+  const nextStart = addDays(weekStart, 7);
+  const nextEnd = addDays(weekStart, 13);
+  const inWeek = (date?: string) => Boolean(date) && date! >= weekStart && date! <= weekEnd;
+  const work = tasks.filter((task) => isWorkTask(task, tasks));
+  const live = work.filter((task) => !isArchived(task, tasks));
+  const movedTo = (task: Task) => (task.shifts ?? []).filter((shift) => inWeek(shift.date) && shift.date <= asOf).at(-1)?.to;
+  const byDue = (due: (item: Checkpoint) => string) => (a: Checkpoint, b: Checkpoint) => due(a).localeCompare(due(b));
+
+  const done = work
+    .map((task) => ({
+      task,
+      items: taskCheckpoints(task).filter((item) => item.done && inWeek(item.doneAt) && item.doneAt! <= asOf).sort((a, b) => a.doneAt!.localeCompare(b.doneAt!)),
+      closed: task.status === "Завершено" && inWeek(task.completedAt),
+      movedTo: movedTo(task),
+    }))
+    .filter((group) => group.items.length > 0 || group.closed);
+
+  const missed = live
+    .filter((task) => !isTaskCompleted(task, asOf))
+    .map((task) => {
+      const end = endDateAt(task, asOf);
+      const due = (item: Checkpoint) => checkpointDate(item) || end;
+      const moved = movedTo(task);
+      // Открыт на тот день: не отмечен или отмечен позже. Отметка без дня считается давней.
+      const open = taskCheckpoints(task).filter((item) => !item.done || (Boolean(item.doneAt) && item.doneAt! > asOf));
+      const items = open.filter((item) => Boolean(moved) || (inWeek(due(item)) && due(item) < today)).sort(byDue(due));
+      return { task, items, movedTo: moved, end };
+    })
+    .filter((group) => group.items.length > 0);
+
+  const next = live
+    .filter((task) => !isTaskCompleted(task))
+    .map((task) => {
+      const due = (item: Checkpoint) => checkpointDate(item) || task.endDate;
+      const items = taskCheckpoints(task).filter((item) => !item.done && due(item) >= nextStart && due(item) <= nextEnd).sort(byDue(due));
+      return { task, items };
+    })
+    .filter((group) => group.items.length > 0)
+    .sort((a, b) => (checkpointDate(a.items[0]) || a.task.endDate).localeCompare(checkpointDate(b.items[0]) || b.task.endDate));
+
+  return { done, missed, next, doneCount: countItems(done), missedCount: countItems(missed), nextCount: countItems(next) };
+}
+
+export interface RegularOccurrence {
+  task: RegularTask;
+  parent?: RegularTask;
+  date: string;
+  record?: RegularRecord;
+  status: WeekRegularStatus;
+}
+
+// «Не сделано» — отметка стоит, но после конца недели: на той неделе повтор не выполнен.
+export type WeekRegularStatus = RegularStatus | "Не сделано";
+
+export interface RegularWeek {
+  week: RegularOccurrence[];
+  next: RegularOccurrence[];
+  doneCount: number;
+  // Не сделано в срок: просрочено или выполнено позже плана.
+  missedCount: number;
+}
+
+function regularOccurrences(regularTasks: RegularTask[], from: string, to: string, today: string): RegularOccurrence[] {
+  const months = new Set([from, to].map((date) => date.slice(0, 8) + "01"));
+  const todayDate = parseDate(today);
+  return regularTasks
+    .flatMap((task) => [...months].flatMap((month) => getPlannedDates(task, month)).filter((date) => date >= from && date <= to).map((date) => ({
+      task,
+      parent: task.parentId ? regularTasks.find((item) => item.id === task.parentId) : undefined,
+      date,
+      record: task.records[date],
+      status: (task.records[date]?.actualDate ?? "") > to ? "Не сделано" as const : occurrenceStatus(date, task.records[date], todayDate),
+    })))
+    .sort((a, b) => a.date.localeCompare(b.date));
+}
+
+// Повторы регулярных задач на неделе и на следующей. Отметка хранит фактическую дату, поэтому
+// статус считается на конец недели: сделанное после неё на этой неделе не засчитывается.
+export function regularWeek(regularTasks: RegularTask[], weekStart: string, today: string): RegularWeek {
+  const week = regularOccurrences(regularTasks, weekStart, addDays(weekStart, 6), today);
+  const next = regularOccurrences(regularTasks, addDays(weekStart, 7), addDays(weekStart, 13), today);
+  return {
+    week,
+    next,
+    doneCount: week.filter((item) => item.status === "Выполнено" || item.status === "С опозданием").length,
+    missedCount: week.filter((item) => item.status === "Просрочено" || item.status === "С опозданием" || item.status === "Не сделано").length,
+  };
+}
+
+// Галочка на вкладке «Неделя»: ставит фактическую дату «сегодня» или снимает её; примечание не трогаем.
+export function toggleRegularOccurrence(task: RegularTask, date: string, today: string): RegularTask {
+  const record = task.records[date] ?? { actualDate: "", note: "" };
+  return { ...task, records: { ...task.records, [date]: { ...record, actualDate: record.actualDate ? "" : today } } };
 }
 
 export function weekBounds(tasks: Task[], today: string) {
