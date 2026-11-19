@@ -1535,6 +1535,8 @@ button.wk-group-title:hover, button.wk-shift-top:hover { color: var(--navy); }
 .wk-reg time { color: #7d8797; font-size: 11px; white-space: nowrap; text-align: right; font-variant-numeric: tabular-nums; }
 .wk-reg time small { display: block; color: #9a5a0a; font-size: 10px; }
 .wk-reg .regular-status { justify-self: end; }
+.wk-check.is-later { border-color: #d99a3a; background: #fff8ec; color: #b06f12; }
+.regular-status-later { color: #9a5a0a; background: #fff; box-shadow: inset 0 0 0 1px #efc98f; }
 
 @media (max-width: 640px) {
   .wk-item { grid-template-columns: 16px 52px minmax(0, 1fr); }

@@ -150,8 +150,11 @@ export interface RegularOccurrence {
   parent?: RegularTask;
   date: string;
   record?: RegularRecord;
-  status: RegularStatus;
+  status: WeekRegularStatus;
 }
+
+// «Сделано позже» — отметка стоит, но после конца недели: на той неделе повтор не выполнен.
+export type WeekRegularStatus = RegularStatus | "Сделано позже";
 
 export interface RegularWeek {
   week: RegularOccurrence[];
@@ -170,13 +173,13 @@ function regularOccurrences(regularTasks: RegularTask[], from: string, to: strin
       parent: task.parentId ? regularTasks.find((item) => item.id === task.parentId) : undefined,
       date,
       record: task.records[date],
-      status: occurrenceStatus(date, task.records[date], todayDate),
+      status: (task.records[date]?.actualDate ?? "") > to ? "Сделано позже" as const : occurrenceStatus(date, task.records[date], todayDate),
     })))
     .sort((a, b) => a.date.localeCompare(b.date));
 }
 
-// Повторы регулярных задач на неделе и на следующей. Статусы — на сегодня: отметка хранит
-// фактическую дату, поэтому и для прошлых недель видно, что сделано вовремя, а что позже.
+// Повторы регулярных задач на неделе и на следующей. Отметка хранит фактическую дату, поэтому
+// статус считается на конец недели: сделанное после неё на этой неделе не засчитывается.
 export function regularWeek(regularTasks: RegularTask[], weekStart: string, today: string): RegularWeek {
   const week = regularOccurrences(regularTasks, weekStart, addDays(weekStart, 6), today);
   const next = regularOccurrences(regularTasks, addDays(weekStart, 7), addDays(weekStart, 13), today);
@@ -184,7 +187,7 @@ export function regularWeek(regularTasks: RegularTask[], weekStart: string, toda
     week,
     next,
     doneCount: week.filter((item) => item.status === "Выполнено" || item.status === "С опозданием").length,
-    missedCount: week.filter((item) => item.status === "Просрочено" || item.status === "С опозданием").length,
+    missedCount: week.filter((item) => item.status === "Просрочено" || item.status === "С опозданием" || item.status === "Сделано позже").length,
   };
 }
 

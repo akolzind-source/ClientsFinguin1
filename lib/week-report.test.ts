@@ -157,6 +157,11 @@ describe("regularWeek — регулярные задачи", () => {
   it("план следующей недели", () => {
     expect(week.next.map((item) => [item.task.id, item.date])).toEqual([["r1", "2026-10-12"], ["r4", "2026-10-14"]]);
   });
+  it("отметка после конца недели: на этой неделе не выполнено, а «сделано позже»", () => {
+    const later = regularWeek([r1, { ...r3, records: { "2026-10-11": { actualDate: "2026-10-13", note: "" } } }], "2026-10-05", "2026-10-14");
+    expect(later.week.map((item) => [item.task.id, item.status])).toEqual([["r1", "С опозданием"], ["r3", "Сделано позже"]]);
+    expect([later.doneCount, later.missedCount]).toEqual([1, 2]);
+  });
   it("галочка ставит сегодняшнюю дату и снимает её, примечание остаётся", () => {
     const marked = toggleRegularOccurrence({ ...r3, records: { "2026-10-11": { actualDate: "", note: "звонили" } } }, "2026-10-11", TODAY);
     expect(marked.records["2026-10-11"]).toEqual({ actualDate: TODAY, note: "звонили" });

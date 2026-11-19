@@ -232,18 +232,19 @@ function RegularBlock({ weekStart, week, onOpen, onToggle }: { weekStart: string
 
 function RegularRow({ item, onOpen, onToggle }: { item: RegularOccurrence; onOpen: (task: RegularTask, date: string) => void; onToggle: (task: RegularTask, date: string) => void }) {
   const done = Boolean(item.record?.actualDate);
-  const late = item.status === "С опозданием";
+  const later = item.status === "Сделано позже";
+  const showActual = done && (later || item.status === "С опозданием");
   return (
     <div className="wk-reg">
-      <button type="button" className={"wk-tick wk-check" + (done ? " is-done" : "")} aria-pressed={done} aria-label={done ? "Снять отметку" : "Отметить выполненной"} onClick={() => onToggle(item.task, item.date)}>
+      <button type="button" className={"wk-tick wk-check" + (later ? " is-later" : done ? " is-done" : "")} aria-pressed={done} aria-label={done ? "Снять отметку" : "Отметить выполненной"} title={later ? "Сделано после этой недели" : undefined} onClick={() => onToggle(item.task, item.date)}>
         {done && <Check size={10} strokeWidth={3.4} />}
       </button>
       <button type="button" className="wk-reg-title" onClick={() => onOpen(item.task, item.date)}>
         {item.parent && <span className="code-chip">{item.parent.title}</span>}<b>{item.task.title}</b>
         {item.task.assignee && <small>{item.task.assignee}</small>}
       </button>
-      <time>{formatDayShortMonth(item.date)}{late && item.record?.actualDate && <small>сделано {formatDayShortMonth(item.record.actualDate)}</small>}</time>
-      <em className={regularStatusClass(item.status)}>{item.status}</em>
+      <time>{formatDayShortMonth(item.date)}{showActual && <small>сделано {formatDayShortMonth(item.record!.actualDate)}</small>}</time>
+      <em className={item.status === "Сделано позже" ? "regular-status regular-status-later" : regularStatusClass(item.status)}>{item.status}</em>
     </div>
   );
 }
