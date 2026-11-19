@@ -55,7 +55,11 @@ export interface RegularTask {
   frequency: RegularFrequency;
   anchorDate: string;
   description: string;
+  // Факт и примечание по плановой дате повтора (с учётом переноса).
   records: Record<string, RegularRecord>;
+  // Исключения из расписания: дата по расписанию → новая дата в том же месяце;
+  // пустая строка — повтор убран (например, из-за праздников).
+  overrides?: Record<string, string>;
 }
 
 export type ShiftReason = "client" | "fd" | "priority" | "blocker" | "other";
@@ -89,6 +93,8 @@ export interface Task {
   shifts?: TaskShift[];
   // День перевода в статус «Завершено»; у задач, завершённых до появления поля, пусто.
   completedAt?: string;
+  // День отправки в архив. Спринты архивной надзадачи прячутся вместе с ней, своё поле им не ставится.
+  archivedAt?: string;
 }
 
 export interface BaselineTask {
@@ -171,4 +177,6 @@ export interface DashboardData {
   // Ручные отметки закрытия месяца: «ГГГГ-ММ» закрываемого месяца → день закрытия.
   // Если отметка есть, она главнее расчёта по ежемесячным регулярным задачам.
   monthClosings?: Record<string, string>;
+  // Резюме недели во вкладке «Неделя»: понедельник недели «ГГГГ-ММ-ДД» → текст.
+  weekNotes?: Record<string, string>;
 }
