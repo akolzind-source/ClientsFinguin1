@@ -1161,6 +1161,16 @@ button:focus-visible, input:focus-visible, select:focus-visible, textarea:focus-
 .regular-occurrence-head small { color: #8993a2; font-size: 9px; }
 .regular-occurrence-head strong { font-size: 14px; }
 .regular-occurrence .field:last-child { margin-bottom: 0; }
+.regular-occurrence.is-cancelled { background: #f7f9fb; }
+.regular-occurrence.is-cancelled strong { color: #8b95a4; text-decoration: line-through; }
+.regular-occurrence-actions { display: flex; flex-wrap: wrap; align-items: center; justify-content: flex-end; gap: 4px 10px; }
+.regular-link-button { padding: 2px 0; display: inline-flex; align-items: center; gap: 4px; border: 0; background: none; color: #215da8; font-size: 10px; font-weight: 650; cursor: pointer; }
+.regular-link-button:hover { color: #163f73; text-decoration: underline; }
+.regular-moved-note { color: #a85d08; font-size: 10px; }
+.regular-moved-note .regular-link-button { font-size: 10px; }
+.regular-move-input { width: 150px; padding: 4px 6px; border: 1px solid #c5d7ee; border-radius: 6px; font: inherit; font-size: 13px; }
+.regular-status-cancelled { color: #7a8494; background: #eef1f4; text-decoration: line-through; }
+.regular-dates small svg { margin-left: 4px; vertical-align: -1px; color: #a85d08; }
 
 .modal-backdrop {
   position: fixed;

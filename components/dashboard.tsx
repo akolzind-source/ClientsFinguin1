@@ -3,6 +3,7 @@
 import {
   Archive,
   ArchiveRestore,
+  CalendarClock,
   CalendarDays,
   ChartGantt,
   Check,
@@ -19,6 +20,7 @@ import {
   Pencil,
   Plus,
   Repeat2,
+  RotateCcw,
   Search,
   Trash2,
   X,
@@ -69,7 +71,7 @@ import type {
 } from "@/lib/types";
 import { calendarBucket, collectCalendarTasks } from "@/lib/calendar-items";
 import type { CalendarTask, CalendarTaskSource } from "@/lib/calendar-items";
-import { getPlannedDates, occurrenceStatus, regularMonthStatus, regularStatusClass } from "@/lib/regular-schedule";
+import { getOccurrences, getPlannedDates, moveOccurrence, occurrenceStatus, regularMonthStatus, regularStatusClass, removeOccurrence, restoreOccurrence } from "@/lib/regular-schedule";
 import { checkpointDate, checkpointMarks, checkpointState } from "@/lib/checkpoint-dates";
 import { isWaitingClient, setCheckpointDone, withCompletion } from "@/lib/checkpoint-tracking";
 import type { CheckpointMark } from "@/lib/checkpoint-dates";
@@ -902,31 +904,76 @@ function RegularPeriodDialog({
   onClose: () => void;
   onSave: (task: RegularTask) => void;
 }) {
-  const plannedDates = getPlannedDates(task, monthStart);
-  const [records, setRecords] = useState<Record<string, RegularRecord>>(() => structuredClone(task.records));
+  // Черновик всей задачи: в окне меняются и факт, и даты повторов этого месяца.
+  const [draft, setDraft] = useState<RegularTask>(() => ({ ...task, records: structuredClone(task.records), overrides: { ...task.overrides } }));
+  // Повтор, у которого сейчас открыто поле переноса, и сообщение о неудачном переносе.
+  const [moving, setMoving] = useState<string | null>(null);
+  const [moveError, setMoveError] = useState<{ scheduled: string; text: string } | null>(null);
+  const occurrences = getOccurrences(draft, monthStart);
   const monthDate = parseDate(monthStart);
+  const monthLast = toISO(new Date(monthDate.getFullYear(), monthDate.getMonth() + 1, 0, 12));
   // Карточка открывается только по клику, то есть заведомо после гидратации,
   // поэтому дату здесь можно взять напрямую — расхождения с разметкой сервера не будет.
   const today = startOfToday();
 
   function updateRecord(plannedDate: string, field: keyof RegularRecord, value: string) {
-    setRecords((current) => ({
+    setDraft((current) => ({
       ...current,
-      [plannedDate]: { ...(current[plannedDate] || { actualDate: "", note: "" }), [field]: value },
+      records: { ...current.records, [plannedDate]: { ...(current.records[plannedDate] || { actualDate: "", note: "" }), [field]: value } },
     }));
+  }
+
+  function changeDate(scheduled: string, next: RegularTask) {
+    if (next === draft) {
+      setMoveError({ scheduled, text: "На эту дату уже стоит другой повтор." });
+      return;
+    }
+    setMoveError(null);
+    setDraft(next);
   }
 
   return (
     <ModalShell title={task.title} subtitle={MONTHS[monthDate.getMonth()] + " " + monthDate.getFullYear() + " · план-факт выполнения"} onClose={onClose}>
-      <form onSubmit={(event) => { event.preventDefault(); onSave({ ...task, records }); }}>
+      <form onSubmit={(event) => { event.preventDefault(); onSave(draft); }}>
         <div className="modal-body regular-period-body">
           {task.description && <p className="regular-description">{task.description}</p>}
-          {plannedDates.map((plannedDate) => {
-            const record = records[plannedDate] || { actualDate: "", note: "" };
+          {occurrences.map(({ scheduled, date: plannedDate }) => {
+            const error = moveError?.scheduled === scheduled ? moveError.text : "";
+            if (!plannedDate) return (
+              <section className="regular-occurrence is-cancelled" key={scheduled}>
+                <div className="regular-occurrence-head">
+                  <div><small>Нормативная дата</small><strong>{formatShortDate(scheduled)}</strong></div>
+                  <div className="regular-occurrence-actions">
+                    <em className="regular-status regular-status-cancelled">Отменено</em>
+                    <button type="button" className="regular-link-button" onClick={() => changeDate(scheduled, restoreOccurrence(draft, scheduled))}><RotateCcw size={13} />Вернуть</button>
+                  </div>
+                </div>
+                {error && <p className="form-error">{error}</p>}
+              </section>
+            );
+            const record = draft.records[plannedDate] || { actualDate: "", note: "" };
             const status = occurrenceStatus(plannedDate, record, today);
             return (
-              <section className="regular-occurrence" key={plannedDate}>
-                <div className="regular-occurrence-head"><div><small>Нормативная дата</small><strong>{formatShortDate(plannedDate)}</strong></div><em className={regularStatusClass(status)}>{status}</em></div>
+              <section className="regular-occurrence" key={scheduled}>
+                <div className="regular-occurrence-head">
+                  <div>
+                    <small>Нормативная дата</small>
+                    {moving === scheduled
+                      ? <input className="regular-move-input" type="date" autoFocus min={monthStart} max={monthLast} defaultValue={plannedDate} onChange={(event) => {
+                        // При ручном вводе по пути бывают «чужие» даты (год ещё не дописан) — их пропускаем.
+                        const value = event.target.value;
+                        if (value >= monthStart && value <= monthLast) changeDate(scheduled, moveOccurrence(draft, scheduled, value));
+                      }} onBlur={() => setMoving(null)} onKeyDown={(event) => { if (event.key === "Enter") { event.preventDefault(); setMoving(null); } }} />
+                      : <strong>{formatShortDate(plannedDate)}</strong>}
+                    {plannedDate !== scheduled && <span className="regular-moved-note">перенесено с {formatShortDate(scheduled)} · <button type="button" className="regular-link-button" onClick={() => changeDate(scheduled, moveOccurrence(draft, scheduled, scheduled))}>вернуть</button></span>}
+                  </div>
+                  <div className="regular-occurrence-actions">
+                    <em className={regularStatusClass(status)}>{status}</em>
+                    <button type="button" className="regular-link-button" onClick={() => { setMoveError(null); setMoving(moving === scheduled ? null : scheduled); }}><CalendarClock size={13} />Перенести</button>
+                    <button type="button" className="regular-link-button" onClick={() => changeDate(scheduled, removeOccurrence(draft, scheduled))}><X size={13} />Убрать</button>
+                  </div>
+                </div>
+                {error && <p className="form-error">{error}</p>}
                 <label className="field">Фактическая дата<input type="date" value={record.actualDate} onChange={(event) => updateRecord(plannedDate, "actualDate", event.target.value)} /></label>
                 <label className="field">Примечание<textarea rows={2} value={record.note} onChange={(event) => updateRecord(plannedDate, "note", event.target.value)} placeholder={status === "Просрочено" ? "Укажите, почему задача не выполнена" : "Детали выполнения или причина отклонения"} /></label>
               </section>
@@ -2106,14 +2153,19 @@ export default function Dashboard({ initialData, initialStorage, serverToday, te
               {regularRows.map((task) => (
                 <div className={"regular-month-row " + (task.parentId ? "regular-child" : "regular-parent")} key={task.id}>
                   {regularMonths.map((month) => {
+                    const occurrences = getOccurrences(task, month.iso);
                     const plannedDates = getPlannedDates(task, month.iso);
                     const actualDates = plannedDates.map((date) => task.records[date]?.actualDate).filter(Boolean);
                     const status = regularMonthStatus(task, month.iso, today);
                     const hasNote = plannedDates.some((date) => Boolean(task.records[date]?.note));
+                    // Все повторы месяца убраны: ячейка остаётся кликабельной, чтобы их можно было вернуть.
+                    const cancelled = !status && occurrences.length > 0;
+                    const movedTitle = occurrences.filter((item) => item.date && item.date !== item.scheduled)
+                      .map((item) => formatShortDate(item.date!) + " — перенесено с " + formatShortDate(item.scheduled)).join("\n");
                     return (
-                      <button className={"regular-month-cell " + (status ? "has-occurrence" : "is-empty")} disabled={!status} key={month.iso} onClick={() => setModal({ kind: "regular-period", task, monthStart: month.iso })}>
-                        {status ? <>
-                          <span className="regular-dates"><small>План</small><b>{plannedDates.map(formatShortDate).join(", ")}</b></span>
+                      <button className={"regular-month-cell " + (status || cancelled ? "has-occurrence" : "is-empty")} disabled={!status && !cancelled} key={month.iso} onClick={() => setModal({ kind: "regular-period", task, monthStart: month.iso })}>
+                        {cancelled ? <span className="regular-cell-footer"><em className="regular-status regular-status-cancelled">Отменено</em></span> : status ? <>
+                          <span className="regular-dates"><small>План{movedTitle && <CalendarClock size={10} aria-label="Есть перенос" />}</small><b title={movedTitle || undefined}>{plannedDates.map(formatShortDate).join(", ")}</b></span>
                           <span className="regular-dates"><small>Факт</small><b>{actualDates.length ? actualDates.map(formatShortDate).join(", ") : "—"}</b></span>
                           <span className="regular-cell-footer"><em className={regularStatusClass(status)}>{status}</em>{hasNote && <i title="Есть примечание"><MessageSquareText size={13} /></i>}</span>
                         </> : <span className="regular-no-plan">Нет выполнения</span>}

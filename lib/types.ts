@@ -55,7 +55,11 @@ export interface RegularTask {
   frequency: RegularFrequency;
   anchorDate: string;
   description: string;
+  // Факт и примечание по плановой дате повтора (с учётом переноса).
   records: Record<string, RegularRecord>;
+  // Исключения из расписания: дата по расписанию → новая дата в том же месяце;
+  // пустая строка — повтор убран (например, из-за праздников).
+  overrides?: Record<string, string>;
 }
 
 export type ShiftReason = "client" | "fd" | "priority" | "blocker" | "other";
