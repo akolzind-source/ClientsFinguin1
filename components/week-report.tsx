@@ -232,7 +232,7 @@ function RegularBlock({ weekStart, week, onOpen, onToggle }: { weekStart: string
 
 function RegularRow({ item, onOpen, onToggle }: { item: RegularOccurrence; onOpen: (task: RegularTask, date: string) => void; onToggle: (task: RegularTask, date: string) => void }) {
   const done = Boolean(item.record?.actualDate);
-  const later = item.status === "Сделано позже";
+  const later = item.status === "Не сделано";
   const showActual = done && (later || item.status === "С опозданием");
   return (
     <div className="wk-reg">
@@ -244,7 +244,7 @@ function RegularRow({ item, onOpen, onToggle }: { item: RegularOccurrence; onOpe
         {item.task.assignee && <small>{item.task.assignee}</small>}
       </button>
       <time>{formatDayShortMonth(item.date)}{showActual && <small>сделано {formatDayShortMonth(item.record!.actualDate)}</small>}</time>
-      <em className={item.status === "Сделано позже" ? "regular-status regular-status-later" : regularStatusClass(item.status)}>{item.status}</em>
+      <em className={item.status === "Не сделано" ? "regular-status regular-status-overdue" : regularStatusClass(item.status)}>{item.status}</em>
     </div>
   );
 }
