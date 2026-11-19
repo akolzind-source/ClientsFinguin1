@@ -44,7 +44,7 @@ describe("provision", () => {
     expect(result.code).toBe(0);
     expect(result.projectId).toBe("prj_1");
     const created = fetch.calls.find((c) => c.key === "POST api.vercel.com/v11/projects");
-    expect(created.body).toEqual({ name: "roadmap-romashka", framework: "nextjs" });
+    expect(created.body).toEqual({ name: "roadmap-romashka", framework: "nextjs", serverlessFunctionRegion: "fra1" });
     const neon = fetch.calls.find((c) => c.key === "POST console.neon.tech/api/v2/projects");
     expect(neon.body).toEqual({ project: { name: "roadmap-romashka", region_id: "aws-eu-central-1", org_id: "org-1" } });
     const env = fetch.calls.find((c) => c.key === "POST api.vercel.com/v10/projects/prj_1/env");

@@ -62,7 +62,7 @@ export async function provision({ repo, team, neonOrg, vercelToken, neonKey, cli
   const q = `teamId=${encodeURIComponent(team)}`;
 
   let project = await call(fetch, VERCEL, vercelToken, "GET", `/v9/projects/${repo}?${q}`);
-  if (project.status === 404) project = await call(fetch, VERCEL, vercelToken, "POST", `/v11/projects?${q}`, { name: repo, framework: "nextjs" });
+  if (project.status === 404) project = await call(fetch, VERCEL, vercelToken, "POST", `/v11/projects?${q}`, { name: repo, framework: "nextjs", serverlessFunctionRegion: "fra1" });
   if (project.status === 401 || project.status === 403) {
     return stop(`Vercel не принял ключ VERCEL_TOKEN (ответ ${project.status}) — напишите владельцу шаблона.`);
   }
