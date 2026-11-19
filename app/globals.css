@@ -486,7 +486,7 @@ button:focus-visible, input:focus-visible, select:focus-visible, textarea:focus-
 .check-tools button:hover { background: #eaf1fb; color: var(--navy); }
 .check-tools .info-button { border: 1px solid #c9d6e8; border-radius: 50%; background: #fff; color: var(--navy-2); font-size: 11px; font-weight: 700; font-family: Georgia, serif; font-style: italic; }
 .check-tools .info-button:hover, .check-tools .info-button.info-open { background: var(--blue-soft); border-color: #9db8dd; }
-.check-note { grid-column: 2 / -1; margin: 2px 0 4px; padding: 9px 12px; border-left: 3px solid #9db8dd; border-radius: 0 8px 8px 0; background: #f3f7fc; color: #33425a; font-size: 12px; line-height: 1.5; }
+.check-note { grid-column: 2 / -1; margin: 2px 0 4px; padding: 9px 12px; white-space: pre-line; border-left: 3px solid #9db8dd; border-radius: 0 8px 8px 0; background: #f3f7fc; color: #33425a; font-size: 12px; line-height: 1.5; }
 .check-note b { display: block; margin-bottom: 2px; color: var(--navy); }
 .check-edit { grid-column: 3 / -1; display: grid; gap: 8px; margin: 2px 0 6px; padding: 10px 12px; border: 1px solid #c9d6e8; border-radius: 8px; background: #fbfcfe; }
 .check-edit label { display: grid; gap: 4px; color: #4e5b70; font-size: 10px; font-weight: 650; }
